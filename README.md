@@ -7,31 +7,47 @@ Symbol repository and vendor-access foundation for the quant momentum pipeline.
 Requirements:
 
 - Docker with Docker Compose v2
-- Python 3.12 for later application work
+- Python 3.12
 
 Bootstrap:
 
 ```bash
 cp .env.example .env
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
 docker compose up -d postgres
 docker compose ps
+alembic upgrade head
+python -m quant_pipeline.infra.smoke
 ```
 
 The Postgres service should report healthy before migrations or smoke checks run.
+
+Stop local services without deleting data:
+
+```bash
+docker compose stop postgres
+```
 
 Reset local database state:
 
 ```bash
 docker compose down -v
+docker compose up -d postgres
+alembic upgrade head
+python -m quant_pipeline.infra.smoke
 ```
 
-That command deletes the local Postgres volume.
+The `docker compose down -v` command deletes the local Postgres volume.
 
 ## Database Schema
 
 The Day 1 baseline schema is documented in `infra/postgres/schema/0001_baseline_symbol_master.sql`.
 
-The application migration tool should be Alembic. The SQL file is the infrastructure reference for the initial migration; engineers should translate it into the Alembic baseline migration and preserve the constraints.
+Alembic applies the baseline migration from `migrations/versions/0001_baseline_symbol_master.py`.
+Both Alembic and the Python smoke command read `DATABASE_URL` from the environment, loading `.env` when present.
 
 Required baseline tables:
 
