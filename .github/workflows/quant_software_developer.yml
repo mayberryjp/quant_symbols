@@ -11,8 +11,8 @@ permissions:
 
 jobs:
   quant-software-developer:
-    if: github.event.label.name == 'quant_software_developer'
-    runs-on: [self-hosted, quant_software_developer]
+    if: github.event.action == 'labeled' && github.event.label.name == 'quant_software_developer_delegated'
+    runs-on: [self-hosted, quant_software_developer_delegated]
 
     steps:
       - name: Checkout repo
@@ -48,28 +48,38 @@ jobs:
           PROMPT_FILE="$RUNNER_TEMP/agent/issue-${ISSUE_NUMBER}-quant-software-developer.md"
 
           cat > "$PROMPT_FILE" <<'EOF'
-          You are working in the mayberryjp/dockercompose repository.
+          You are working in the mayberryjp/quant_symbols repository.
 
           You are the Quant Software Developer agent.
 
-          Your responsibility:
-          - Design and implement Python code for acquiring symbol/security/reference information from Massive/Polygon.
-          - Focus on maintainable Python modules, clients, config handling, retry/error handling, pagination, rate-limit awareness, typing, tests, and useful CLI or service entrypoints when appropriate.
+          Mission:
+          - Design and implement Python software work for the quant_symbols repository.
+          - Focus on acquiring symbol/security/reference information from Massive/Polygon via maintainable Python code.
+          - Build clean API-client modules, pagination handling, retry/error handling, rate-limit awareness, config loading, typing, tests, and CLI/service entrypoints when appropriate.
           - Do not hard-code API keys or secrets.
-          - Use environment variables or existing repo config patterns for credentials.
-          - If the issue involves PostgreSQL persistence, coordinate through clean interfaces and document the expected database contract, but avoid major schema work unless the issue clearly asks for it.
-          - If the issue involves Docker/container execution, make the smallest needed integration change and document it.
+          - Use environment variables or the existing repository config pattern for credentials.
+          - Keep software work cleanly separated from database schema and infrastructure setup unless the issue explicitly asks for cross-area work.
 
-          Important:
-          - You must inspect the repository and make source/config/documentation changes unless the requested work is already implemented.
+          Repository expectations:
+          - Inspect the repository before making changes.
+          - Make source/config/documentation changes unless the requested work is already implemented.
           - Do not only summarize the issue.
           - Do not stop after analysis.
           - If no change is needed, explain exactly which existing files already implement the behavior.
           - Make the smallest reasonable change.
           - Do not edit unrelated files.
           - Do not change secrets, credentials, workflow permissions, runner config, or GitHub Actions unless the issue explicitly asks for workflow changes.
+          - Do not hard-code API keys, passwords, tokens, or connection strings with secrets.
           - Run relevant tests or validation if available.
           - Leave the repo in a commit-ready state.
+
+          Software guidance:
+          - Prefer small, testable Python modules.
+          - Use requests/httpx or the repository's existing HTTP-client pattern if one already exists.
+          - Handle provider pagination and partial failures explicitly.
+          - Normalize provider responses into clear internal models or dictionaries.
+          - If persistence is required, use an existing repository database interface or document the expected database contract rather than inventing unrelated schema work.
+          - Update .env.example when adding new required configuration such as MASSIVE_API_KEY or POLYGON_API_KEY.
 
           Documentation requirement:
           - Document software design, configuration, and code changes in the repo.
@@ -79,8 +89,8 @@ jobs:
 
           Required final artifact:
           - Before finishing, create or update .agent/change-summaries/issue-${{ github.event.issue.number }}-quant-software-developer.md.
-          - This file will be consumed by later documentation/release agents.
-          - The file is required even if no code changes were made.
+          - This file is required even if no code changes were made.
+          - Base it only on verified repository changes. Do not invent behavior.
           - Use exactly this format:
 
           ## Agent Change Summary
@@ -119,9 +129,9 @@ jobs:
           - ...
 
           Definition of done:
-          - The requested Python/software work is implemented or clearly proven already implemented.
-          - Relevant validation passes, or you document why it could not be run.
-          - Documentation exists for the design/config/code changes.
+          - The requested software work is implemented or clearly proven already implemented.
+          - Relevant validation passes, or you clearly document why validation could not be run.
+          - Software design/config/code changes are documented in the repo.
           - .agent/change-summaries/issue-${{ github.event.issue.number }}-quant-software-developer.md exists and follows the required format.
           - The change is ready for human review.
 
@@ -236,7 +246,7 @@ jobs:
           echo "=== Agent change summary ==="
           cat "$SUMMARY_FILE"
 
-      - name: Show Codex output
+      - name: Show Codex output and git status
         if: always()
         run: |
           echo "=== Codex output ==="
@@ -257,12 +267,17 @@ jobs:
           echo "=== Git diff summary ==="
           git diff --stat || true
 
-      - name: Block sensitive file changes
+      - name: Block sensitive or workflow file changes
         run: |
           CHANGED="$(git diff --name-only)"
 
           if echo "$CHANGED" | grep -E '(^\.env|\.pem$|\.key$|secrets|credentials)' ; then
             echo "Refusing PR because sensitive files were changed."
+            exit 1
+          fi
+
+          if echo "$CHANGED" | grep -E '^\.github/workflows/' ; then
+            echo "Refusing PR because workflow files were changed."
             exit 1
           fi
 
@@ -282,8 +297,12 @@ jobs:
           fi
 
           if find . -type f -name 'test_*.py' | grep -q .; then
-            echo "Detected Python tests"
-            python3 -m pytest || true
+            if python3 -c 'import pytest' >/dev/null 2>&1; then
+              echo "Detected Python tests and pytest is available"
+              python3 -m pytest
+            else
+              echo "Detected Python tests but pytest is not installed; skipping pytest."
+            fi
           fi
 
       - name: Create branch and PR if changed
