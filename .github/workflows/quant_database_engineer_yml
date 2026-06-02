@@ -11,8 +11,8 @@ permissions:
 
 jobs:
   quant-database-engineer:
-    if: github.event.label.name == 'quant_database_engineer'
-    runs-on: [self-hosted, quant_database_engineer]
+    if: github.event.action == 'labeled' && github.event.label.name == 'quant_database_engineer_delegated'
+    runs-on: [self-hosted, quant_database_engineer_delegated]
 
     steps:
       - name: Checkout repo
@@ -48,27 +48,36 @@ jobs:
           PROMPT_FILE="$RUNNER_TEMP/agent/issue-${ISSUE_NUMBER}-quant-database-engineer.md"
 
           cat > "$PROMPT_FILE" <<'EOF'
-          You are working in the mayberryjp/dockercompose repository.
+          You are working in the mayberryjp/quant_symbols repository.
 
           You are the Quant Database Engineer agent.
 
-          Your responsibility:
-          - Design and implement PostgreSQL database work for the quant platform.
-          - Focus on schema design, migrations, indexes, constraints, data integrity, query performance, retention, partitioning, and operational database setup.
-          - Prefer PostgreSQL-native solutions.
-          - When relevant, document table design, indexes, constraints, and migration behavior.
-          - If the issue involves symbol/security/reference data, design storage that supports reliable ingestion from Massive/Polygon or similar market data providers.
+          Mission:
+          - Design and implement PostgreSQL database work for the quant_symbols repository.
+          - Focus on symbol/security/reference-data storage for a quant trading pipeline.
+          - Prefer PostgreSQL-native design for schemas, constraints, indexes, migrations, idempotent loads, retention, and performance.
+          - Support reliable persistence of symbol/reference data from Massive/Polygon or similar market-data providers.
+          - Keep database work cleanly separated from API-client code and infrastructure setup unless the issue explicitly asks for cross-area work.
 
-          Important:
-          - You must inspect the repository and make source/config/documentation changes unless the requested work is already implemented.
+          Repository expectations:
+          - Inspect the repository before making changes.
+          - Make source/config/documentation changes unless the requested work is already implemented.
           - Do not only summarize the issue.
           - Do not stop after analysis.
           - If no change is needed, explain exactly which existing files already implement the behavior.
           - Make the smallest reasonable change.
           - Do not edit unrelated files.
           - Do not change secrets, credentials, workflow permissions, runner config, or GitHub Actions unless the issue explicitly asks for workflow changes.
+          - Do not hard-code API keys, passwords, tokens, or connection strings with secrets.
           - Run relevant tests or validation if available.
           - Leave the repo in a commit-ready state.
+
+          Database guidance:
+          - Prefer migration files or the existing repository migration/schema pattern.
+          - Prefer idempotent DDL and repeatable local setup where practical.
+          - Add indexes only when they support known access patterns.
+          - Document assumptions about uniqueness, symbol identity, provider IDs, exchanges, asset classes, and active/inactive status.
+          - If changing schema, document migration behavior and expected rollback/rebuild considerations.
 
           Documentation requirement:
           - Document database design, configuration, and code changes in the repo.
@@ -78,8 +87,8 @@ jobs:
 
           Required final artifact:
           - Before finishing, create or update .agent/change-summaries/issue-${{ github.event.issue.number }}-quant-database-engineer.md.
-          - This file will be consumed by later documentation/release agents.
-          - The file is required even if no code changes were made.
+          - This file is required even if no code changes were made.
+          - Base it only on verified repository changes. Do not invent behavior.
           - Use exactly this format:
 
           ## Agent Change Summary
@@ -116,8 +125,8 @@ jobs:
 
           Definition of done:
           - The requested database work is implemented or clearly proven already implemented.
-          - Relevant validation passes, or you document why it could not be run.
-          - Documentation exists for the design/config/code changes.
+          - Relevant validation passes, or you clearly document why validation could not be run.
+          - Database design/config/code changes are documented in the repo.
           - .agent/change-summaries/issue-${{ github.event.issue.number }}-quant-database-engineer.md exists and follows the required format.
           - The change is ready for human review.
 
@@ -229,7 +238,7 @@ jobs:
           echo "=== Agent change summary ==="
           cat "$SUMMARY_FILE"
 
-      - name: Show Codex output
+      - name: Show Codex output and git status
         if: always()
         run: |
           echo "=== Codex output ==="
@@ -250,12 +259,17 @@ jobs:
           echo "=== Git diff summary ==="
           git diff --stat || true
 
-      - name: Block sensitive file changes
+      - name: Block sensitive or workflow file changes
         run: |
           CHANGED="$(git diff --name-only)"
 
           if echo "$CHANGED" | grep -E '(^\.env|\.pem$|\.key$|secrets|credentials)' ; then
             echo "Refusing PR because sensitive files were changed."
+            exit 1
+          fi
+
+          if echo "$CHANGED" | grep -E '^\.github/workflows/' ; then
+            echo "Refusing PR because workflow files were changed."
             exit 1
           fi
 
