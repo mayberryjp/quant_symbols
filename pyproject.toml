@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-symbols"
+version = "0.1.0"
+description = "Symbol and reference-data storage foundation for the quant momentum pipeline."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.13,<2",
+    "psycopg[binary]>=3.1,<4",
+    "SQLAlchemy>=2.0,<3",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

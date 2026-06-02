@@ -6,16 +6,24 @@ Day 1 creates the symbol identity spine only. It does not create ingestion jobs,
 
 ## Baseline Migration Contract
 
-The Alembic baseline migration must:
+The Alembic baseline migration is `0001_baseline_symbol_master` in `alembic/versions/0001_baseline_symbol_master.py`. It:
 
-- create `btree_gist` extension
-- create schemas `symbol_master`, `market_data`, and `signals`
-- create the six `symbol_master` tables in `schema/0001_baseline_symbol_master.sql`
-- seed the `massive` vendor row
-- seed common U.S. exchange rows
-- preserve the `vendor_symbols` effective-date exclusion constraint
+- creates `btree_gist` extension
+- creates schemas `symbol_master`, `market_data`, and `signals`
+- creates the six `symbol_master` tables defined by `schema/0001_baseline_symbol_master.sql`
+- seeds the `massive` vendor row
+- seeds common U.S. exchange rows
+- preserves the `vendor_symbols` effective-date exclusion constraint
 
 ## Local Commands
+
+Install Python dependencies:
+
+```bash
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
+```
 
 Start Postgres:
 
@@ -27,6 +35,18 @@ Check health:
 
 ```bash
 docker compose ps postgres
+```
+
+Apply migrations:
+
+```bash
+alembic upgrade head
+```
+
+Run the database smoke check:
+
+```bash
+python -m quant_pipeline.infra.smoke
 ```
 
 Open `psql` inside the container:
@@ -42,3 +62,5 @@ docker compose down -v
 ```
 
 That reset command deletes the local Postgres volume.
+
+The baseline downgrade drops the Day 1 tables, the `signals`, `market_data`, and `symbol_master` schemas, and the `btree_gist` extension. In a shared database, review `btree_gist` dependencies before downgrading.
