@@ -2,7 +2,7 @@
 
 Symbol repository and vendor-access foundation for the quant momentum pipeline.
 
-## Day 1 Local Infrastructure
+## Local Infrastructure
 
 Requirements:
 
@@ -29,48 +29,58 @@ That command deletes the local Postgres volume.
 
 ## Database Schema
 
-The Day 1 baseline schema is documented in `infra/postgres/schema/0001_baseline_symbol_master.sql`.
+The executable Day 2 schema is Alembic revision
+`0001_symbol_master_vendor_traceability`.
 
-The application migration tool should be Alembic. The SQL file is the infrastructure reference for the initial migration; engineers should translate it into the Alembic baseline migration and preserve the constraints.
+Apply it locally with:
 
-Required baseline tables:
+```bash
+python -m quant_symbols.cli db upgrade
+python -m quant_symbols.cli db verify
+```
 
-- `symbol_master.vendors`
+The migration creates schemas:
+
+- `symbol_master`
+- `market_data`
+- `signals`
+
+Required `symbol_master` tables:
+
+- `symbol_master.vendor_sources`
+- `symbol_master.vendor_api_runs`
+- `symbol_master.raw_vendor_payloads`
 - `symbol_master.exchanges`
-- `symbol_master.assets`
-- `symbol_master.etf_profiles`
-- `symbol_master.vendor_symbols`
-- `symbol_master.ingestion_runs`
+- `symbol_master.symbols`
+- `symbol_master.symbol_vendor_ids`
+- `symbol_master.symbol_aliases`
 
-Important identity rule:
+Important traceability rules:
 
-- `vendor_symbols` uses `active_from` and `active_to` date windows.
-- Ticker text is not canonical identity.
-- The same vendor symbol may be reused over time, but overlapping active windows for the same vendor and symbol must be rejected.
+- Complete vendor records are stored in `symbol_master.raw_vendor_payloads.payload`.
+- Raw vendor payload rows are append-only application data.
+- Normalized symbol and vendor-id rows can link back to vendor API runs and raw payloads.
+- Active and inactive symbols are preserved to avoid survivorship bias.
 
 ## Smoke Acceptance
 
-Day 1 is complete when:
+Day 2 database smoke flow:
 
 ```bash
 docker compose up -d postgres
-alembic upgrade head
-python -m quant_pipeline.infra.smoke
+python -m quant_symbols.cli db upgrade
+python -m quant_symbols.cli db verify
+python -m quant_symbols.cli db downgrade-base
+python -m quant_symbols.cli db upgrade
+python -m quant_symbols.cli db verify
 ```
-
-The smoke command should verify:
-
-- Postgres is reachable.
-- Alembic head is applied.
-- The six baseline `symbol_master` tables exist.
 
 Expected output shape:
 
 ```text
-postgres=ok database=quant user=quant alembic_head=0001_baseline_symbol_master tables=6
+postgres=ok schema_version=0001_symbol_master_vendor_traceability tables=7 vendor_sources=1 exchanges=5
 ```
 
 ## Current GitHub Issues
 
-- Day 1 infrastructure/schema foundation: <https://github.com/mayberryjp/quant_symbols/issues/1>
-- Day 2 Massive/Polygon client foundation: <https://github.com/mayberryjp/quant_symbols/issues/2>
+- Day 2 database schema v1: <https://github.com/mayberryjp/quant_symbols/issues/2>
