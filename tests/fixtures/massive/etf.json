@@ -1,0 +1,13 @@
+{
+  "ticker": "SPY",
+  "name": "SPDR S&P 500 ETF Trust",
+  "market": "stocks",
+  "locale": "us",
+  "primary_exchange": "ARCX",
+  "type": "ETF",
+  "active": true,
+  "currency_name": "usd",
+  "composite_figi": "BBG000BDTBL9",
+  "share_class_figi": "BBG001S72SM3",
+  "last_updated_utc": "2025-05-01T00:00:00Z"
+}
