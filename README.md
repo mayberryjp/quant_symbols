@@ -15,12 +15,12 @@ Bootstrap:
 cp .env.example .env
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
+python3 -m pip install --upgrade pip
+python3 -m pip install -e .
 docker compose up -d postgres
 docker compose ps
 alembic upgrade head
-python -m quant_pipeline.infra.smoke
+python3 -m quant_pipeline.infra.smoke
 ```
 
 The Postgres service should report healthy before migrations or smoke checks run.
@@ -35,23 +35,21 @@ Reset local database state:
 
 ```bash
 docker compose down -v
-docker compose up -d postgres
-alembic upgrade head
-python -m quant_pipeline.infra.smoke
 ```
 
 The `docker compose down -v` command deletes the local Postgres volume.
 
 ## Database Schema
 
-The executable Day 2 schema is Alembic revision
-`0001_symbol_master_vendor_traceability`.
+Database schema and migration files are owned by the database engineer. Keep executable migration artifacts in the database engineer's migration path, not under `infra/postgres`.
+
+The executable Day 2 schema is Alembic revision `0001_symbol_master_vendor_traceability`.
 
 Apply it locally with:
 
 ```bash
-python -m quant_symbols.cli db upgrade
-python -m quant_symbols.cli db verify
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli db verify
 ```
 
 The migration creates schemas:
@@ -83,11 +81,11 @@ Day 2 database smoke flow:
 
 ```bash
 docker compose up -d postgres
-python -m quant_symbols.cli db upgrade
-python -m quant_symbols.cli db verify
-python -m quant_symbols.cli db downgrade-base
-python -m quant_symbols.cli db upgrade
-python -m quant_symbols.cli db verify
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli db verify
+python3 -m quant_symbols.cli db downgrade-base
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli db verify
 ```
 
 Expected output shape:

@@ -29,9 +29,9 @@ postgresql+psycopg://quant:quant_dev_password@localhost:5432/quant
 ## Commands
 
 ```bash
-python -m quant_symbols.cli db upgrade
-python -m quant_symbols.cli db verify
-python -m quant_symbols.cli db downgrade-base
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli db verify
+python3 -m quant_symbols.cli db downgrade-base
 ```
 
 The verify command is read-only and checks connectivity, the Alembic revision,
