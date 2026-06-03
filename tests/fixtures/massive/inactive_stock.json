@@ -1,0 +1,15 @@
+{
+  "ticker": "SBNY",
+  "name": "Signature Bank",
+  "market": "stocks",
+  "locale": "us",
+  "primary_exchange": "XNAS",
+  "type": "CS",
+  "active": false,
+  "currency_name": "usd",
+  "cik": "0001288784",
+  "composite_figi": "BBG000Q8GFP9",
+  "share_class_figi": "BBG001SBCYN0",
+  "delisted_utc": "2023-03-13T00:00:00Z",
+  "last_updated_utc": "2023-03-13T00:00:00Z"
+}

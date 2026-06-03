@@ -1,0 +1,14 @@
+{
+  "ticker": "BABA",
+  "name": "Alibaba Group Holding Limited American Depositary Shares",
+  "market": "stocks",
+  "locale": "us",
+  "primary_exchange": "XNYS",
+  "type": "ADRC",
+  "active": true,
+  "currency_name": "usd",
+  "cik": "0001577552",
+  "composite_figi": "BBG006G2JVL2",
+  "share_class_figi": "BBG006G2JVM1",
+  "last_updated_utc": "2025-05-01T00:00:00Z"
+}
