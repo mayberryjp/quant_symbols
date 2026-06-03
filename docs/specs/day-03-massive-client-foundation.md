@@ -303,7 +303,7 @@ Do not require live fixture capture in normal test runs. If live capture tooling
 Add a local smoke command that can run without hitting the live API:
 
 ```bash
-python -m quant_symbols.cli vendors massive tickers --fixture tests/fixtures/massive/tickers_active_stock_page1.json --dry-run
+python3 -m quant_symbols.cli vendors massive tickers --fixture tests/fixtures/massive/tickers_active_stock_page1.json --dry-run
 ```
 
 Expected output shape:
@@ -315,7 +315,7 @@ vendor=massive endpoint=/v3/reference/tickers mode=fixture pages=1 records=2 fir
 Add an optional live command, but it must require an explicit flag:
 
 ```bash
-python -m quant_symbols.cli vendors massive tickers --live --market stocks --active true --limit 100
+python3 -m quant_symbols.cli vendors massive tickers --live --market stocks --active true --limit 100
 ```
 
 Rules:

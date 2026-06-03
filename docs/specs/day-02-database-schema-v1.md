@@ -62,13 +62,13 @@ docker compose up -d postgres
 Apply migrations:
 
 ```bash
-python -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli db upgrade
 ```
 
 Verify the schema:
 
 ```bash
-python -m quant_symbols.cli db verify
+python3 -m quant_symbols.cli db verify
 ```
 
 Expected output:
@@ -80,7 +80,7 @@ postgres=ok schema_version=0001_symbol_master_vendor_traceability tables=7 vendo
 Downgrade to base:
 
 ```bash
-python -m quant_symbols.cli db downgrade-base
+python3 -m quant_symbols.cli db downgrade-base
 ```
 
 Downgrade drops the Day 2 tables and schemas created by this migration. Local
