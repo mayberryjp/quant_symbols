@@ -31,6 +31,18 @@ Check health:
 docker compose ps postgres
 ```
 
+Apply migrations:
+
+```bash
+alembic upgrade head
+```
+
+Run the Python smoke check:
+
+```bash
+python -m quant_pipeline.infra.smoke
+```
+
 Open `psql` inside the container:
 
 ```bash
@@ -57,3 +69,30 @@ docker compose down -v
 ```
 
 That reset command deletes the local Postgres volume.
+
+## Issue #1 Infrastructure Validation
+
+Static validation completed on 2026-06-02:
+
+- `docker compose --env-file .env.example config` rendered successfully.
+- `.env.example` defines `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `DATABASE_URL`.
+- The rendered Postgres service uses image `postgres:16-alpine`, publishes host port `5432`, mounts named volume `quant_symbols_postgres_data`, and includes the `pg_isready` healthcheck.
+- `infra/postgres/schema/0001_baseline_symbol_master.sql` contains the six expected `symbol_master` tables and the `vendor_symbols` exclusion constraint for effective-date overlap prevention.
+
+Live Docker validation is pending in this runtime because the Docker daemon was unavailable:
+
+```text
+docker compose up -d postgres
+unable to get image 'postgres:16-alpine': Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
+```
+
+When the Docker daemon is available, run these commands before closing the Day 1 infrastructure validation:
+
+```bash
+docker compose up -d postgres
+docker compose ps postgres
+docker compose exec -T postgres psql -U quant -d quant < infra/postgres/schema/0001_baseline_symbol_master.sql
+docker compose exec postgres psql -U quant -d quant -c \
+  "select table_schema, table_name from information_schema.tables where table_schema = 'symbol_master' order by table_name;"
+docker compose down -v
+```

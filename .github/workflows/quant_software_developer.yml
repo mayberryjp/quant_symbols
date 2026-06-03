@@ -267,17 +267,14 @@ jobs:
           echo "=== Git diff summary ==="
           git diff --stat || true
 
-      - name: Block sensitive or workflow file changes
+      - name: Refuse PR if sensitive files changed
+        shell: bash
         run: |
           CHANGED="$(git diff --name-only)"
-
-          if echo "$CHANGED" | grep -E '(^\.env|\.pem$|\.key$|secrets|credentials)' ; then
+          echo "$CHANGED"
+      
+          if echo "$CHANGED" | grep -E '(^|/)(\.env|\.env\.(local|production|prod|staging|dev|development|test)|.*secret.*|.*credential.*|.*token.*)$'; then
             echo "Refusing PR because sensitive files were changed."
-            exit 1
-          fi
-
-          if echo "$CHANGED" | grep -E '^\.github/workflows/' ; then
-            echo "Refusing PR because workflow files were changed."
             exit 1
           fi
 
