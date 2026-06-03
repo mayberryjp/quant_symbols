@@ -6,14 +6,18 @@ Day 1 creates the symbol identity spine only. It does not create ingestion jobs,
 
 ## Baseline Migration Contract
 
-The Alembic baseline migration must:
+The Alembic baseline migration in `migrations/versions/0001_baseline_symbol_master.py`:
 
-- create `btree_gist` extension
-- create schemas `symbol_master`, `market_data`, and `signals`
-- create the six `symbol_master` tables in `schema/0001_baseline_symbol_master.sql`
-- seed the `massive` vendor row
-- seed common U.S. exchange rows
-- preserve the `vendor_symbols` effective-date exclusion constraint
+- creates `btree_gist` extension
+- creates schemas `symbol_master`, `market_data`, and `signals`
+- creates the six `symbol_master` tables in `schema/0001_baseline_symbol_master.sql`
+- seeds the `massive` vendor row
+- seeds common U.S. exchange rows
+- preserves the `vendor_symbols` effective-date exclusion constraint
+
+The exclusion constraint prevents overlapping `active_from` / `active_to`
+windows for the same `(vendor_id, vendor_symbol)`. This keeps ticker text as a
+provider-scoped identifier instead of treating it as canonical asset identity.
 
 ## Local Commands
 
@@ -27,6 +31,18 @@ Check health:
 
 ```bash
 docker compose ps postgres
+```
+
+Apply migrations:
+
+```bash
+alembic upgrade head
+```
+
+Run the Python smoke check:
+
+```bash
+python -m quant_pipeline.infra.smoke
 ```
 
 Open `psql` inside the container:
