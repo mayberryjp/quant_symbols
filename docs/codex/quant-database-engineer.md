@@ -1,43 +1,38 @@
 # Quant Database Engineer Notes
 
-## Day 1 Database Implementation
+Issue #2 adds the first executable PostgreSQL migration path for the repository.
 
-The Day 1 implementation adds Alembic wiring and a Python smoke check for the
-baseline symbol master schema.
+## Implemented Database Surface
 
-Configuration:
+- Alembic configuration lives in `alembic.ini` and `alembic/env.py`.
+- Migration `0001_symbol_master_vendor_traceability` creates schemas
+  `symbol_master`, `market_data`, and `signals`.
+- The migration creates seven `symbol_master` tables:
+  `vendor_sources`, `vendor_api_runs`, `raw_vendor_payloads`, `exchanges`,
+  `symbols`, `symbol_vendor_ids`, and `symbol_aliases`.
+- The migration seeds the `massive` vendor source and five common U.S. exchange
+  rows.
+- Lookup indexes support canonical ticker lookup, vendor ticker lookup, and raw
+  payload lookup by vendor API run.
+- Active ticker and vendor-symbol uniqueness is enforced only for active rows so
+  inactive history can be retained.
 
-- `DATABASE_URL` is required by Alembic and by `python -m quant_pipeline.infra.smoke`.
-- `.env.example` documents the local development value:
-  `postgresql+psycopg://quant:quant_dev_password@localhost:5432/quant`.
-- `migrations/env.py` and the smoke command load `.env` when present, without
-  overriding already exported environment variables.
+## Configuration
 
-Schema:
+Database commands read `DATABASE_URL` from the environment. If unset, they use
+the local Docker default from `.env.example`:
 
-- The baseline Alembic revision is `0001_baseline_symbol_master`.
-- The migration creates `btree_gist`, schemas `symbol_master`, `market_data`,
-  and `signals`, and the six baseline `symbol_master` tables:
-  `vendors`, `exchanges`, `assets`, `etf_profiles`, `vendor_symbols`, and
-  `ingestion_runs`.
-- `vendors` is seeded with the `massive` provider row.
-- `exchanges` is seeded with `XNYS`, `XNAS`, `ARCX`, `BATS`, and `OTCM`.
-- `vendor_symbols` keeps provider ticker text separate from canonical asset
-  identity. It supports reuse of vendor symbols over time with `active_from`
-  and `active_to` date windows.
-- PostgreSQL rejects overlapping effective windows for the same
-  `(vendor_id, vendor_symbol)` through a GiST exclusion constraint backed by
-  `btree_gist`.
+```text
+postgresql+psycopg://quant:quant_dev_password@localhost:5432/quant
+```
 
-Migration behavior:
+## Commands
 
-- `alembic upgrade head` applies the baseline migration from scratch.
-- `alembic downgrade base` drops the Day 1 tables and schemas created by the
-  baseline migration. The downgrade does not drop the shared `btree_gist`
-  extension because it may be used by other database objects.
+```bash
+python -m quant_symbols.cli db upgrade
+python -m quant_symbols.cli db verify
+python -m quant_symbols.cli db downgrade-base
+```
 
-Validation:
-
-- `python -m quant_pipeline.infra.smoke` connects to Postgres, confirms the
-  applied Alembic revision, and verifies the six expected `symbol_master`
-  tables exist.
+The verify command is read-only and checks connectivity, the Alembic revision,
+the seven expected `symbol_master` tables, and the seed row counts.

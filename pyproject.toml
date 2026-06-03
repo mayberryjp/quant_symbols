@@ -5,14 +5,23 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "quant-symbols"
 version = "0.1.0"
-description = "Symbol repository and vendor reference-data foundation for the quant momentum pipeline."
+description = "Symbol master and reference-data persistence for quant trading pipelines."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.8"
 dependencies = [
-    "alembic>=1.13,<2",
-    "psycopg[binary]>=3.2,<4",
-    "SQLAlchemy>=2.0,<3",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.1",
+    "SQLAlchemy>=2.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
 ]
 
 [tool.setuptools.packages.find]
-where = ["src"]
+include = ["quant_symbols*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

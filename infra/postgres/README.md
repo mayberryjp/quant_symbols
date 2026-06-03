@@ -2,22 +2,20 @@
 
 This folder owns database infrastructure design artifacts.
 
-Day 1 creates the symbol identity spine only. It does not create ingestion jobs, market-data tables, signal tables, or strategy tables.
+The executable schema is owned by Alembic at the repository root. The current
+database revision is `0001_symbol_master_vendor_traceability`.
 
-## Baseline Migration Contract
+## Migration Contract
 
-The Alembic baseline migration in `migrations/versions/0001_baseline_symbol_master.py`:
+The Day 2 Alembic migration:
 
-- creates `btree_gist` extension
-- creates schemas `symbol_master`, `market_data`, and `signals`
-- creates the six `symbol_master` tables in `schema/0001_baseline_symbol_master.sql`
-- seeds the `massive` vendor row
-- seeds common U.S. exchange rows
-- preserves the `vendor_symbols` effective-date exclusion constraint
-
-The exclusion constraint prevents overlapping `active_from` / `active_to`
-windows for the same `(vendor_id, vendor_symbol)`. This keeps ticker text as a
-provider-scoped identifier instead of treating it as canonical asset identity.
+- create schemas `symbol_master`, `market_data`, and `signals`
+- create seven `symbol_master` tables for vendor traceability and normalized symbols
+- store complete raw vendor records in `symbol_master.raw_vendor_payloads.payload`
+- link raw payloads to `symbol_master.vendor_api_runs`
+- seed the `massive` vendor source
+- seed common U.S. exchange rows
+- add lookup indexes for canonical tickers, vendor tickers, and raw payload run linkage
 
 ## Local Commands
 
@@ -51,17 +49,17 @@ Open `psql` inside the container:
 docker compose exec postgres psql -U quant -d quant
 ```
 
-Apply the Day 1 reference schema directly for infrastructure validation:
+Apply and verify migrations:
 
 ```bash
-docker compose exec -T postgres psql -U quant -d quant < infra/postgres/schema/0001_baseline_symbol_master.sql
+python -m quant_symbols.cli db upgrade
+python -m quant_symbols.cli db verify
 ```
 
-List the expected baseline tables:
+Downgrade the local database to Alembic base:
 
 ```bash
-docker compose exec postgres psql -U quant -d quant -c \
-  "select table_schema, table_name from information_schema.tables where table_schema = 'symbol_master' order by table_name;"
+python -m quant_symbols.cli db downgrade-base
 ```
 
 Reset local database state:
