@@ -43,6 +43,29 @@ class MassiveClient:
     def from_env(cls, *, transport: Transport | None = None, sleep: SleepFunc | None = None) -> "MassiveClient":
         return cls(MassiveConfig.from_env(require_api_key=True), transport=transport, sleep=sleep)
 
+    def get_ticker_reference_page(
+        self,
+        *,
+        ticker: str | None = None,
+        market: str | None = None,
+        locale: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, object]:
+        """Request one `/v3/reference/tickers` page and return its decoded JSON."""
+
+        url = self._with_api_key(
+            self._build_url(
+                "/v3/reference/tickers",
+                self._ticker_reference_params(
+                    ticker=ticker,
+                    market=market,
+                    locale=locale,
+                    limit=limit,
+                ),
+            )
+        )
+        return self._request_json(url)
+
     def iter_ticker_pages(
         self,
         *,
@@ -55,17 +78,13 @@ class MassiveClient:
     ) -> Iterator[TickerReferencePage]:
         """Yield paginated `/v3/reference/tickers` pages."""
 
-        params: dict[str, Any] = {}
-        if ticker is not None:
-            params["ticker"] = ticker
-        if market is not None:
-            params["market"] = market
-        if locale is not None:
-            params["locale"] = locale
-        if active is not None:
-            params["active"] = str(active).lower()
-        if limit is not None:
-            params["limit"] = limit
+        params = self._ticker_reference_params(
+            ticker=ticker,
+            market=market,
+            locale=locale,
+            active=active,
+            limit=limit,
+        )
 
         next_url: str | None = self._build_url("/v3/reference/tickers", params)
         pages_seen = 0
@@ -89,6 +108,28 @@ class MassiveClient:
 
         for page in self.iter_ticker_pages(**kwargs):
             yield from page.raw_vendor_payloads()
+
+    def _ticker_reference_params(
+        self,
+        *,
+        ticker: str | None = None,
+        market: str | None = None,
+        locale: str | None = None,
+        active: bool | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if ticker is not None:
+            params["ticker"] = ticker
+        if market is not None:
+            params["market"] = market
+        if locale is not None:
+            params["locale"] = locale
+        if active is not None:
+            params["active"] = str(active).lower()
+        if limit is not None:
+            params["limit"] = limit
+        return params
 
     def _request_json(self, url: str) -> dict[str, object]:
         max_attempts = self.config.retry_count + 1
