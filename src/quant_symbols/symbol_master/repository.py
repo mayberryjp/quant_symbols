@@ -8,7 +8,12 @@ import json
 from typing import Any
 
 from quant_symbols.symbol_master.massive_mapper import AliasCandidate, ExchangeCandidate, SymbolCandidate
-from quant_symbols.symbol_master.normalization import MassiveExchangeCandidate, MassiveTickerCandidate
+from quant_symbols.symbol_master.normalization import (
+    MassiveAliasCandidate,
+    MassiveExchangeCandidate,
+    MassiveTickerCandidate,
+    map_massive_alias_candidates,
+)
 
 
 @dataclass(frozen=True)
@@ -25,6 +30,11 @@ class ExchangeUpsertResult:
 @dataclass(frozen=True)
 class SymbolVendorIdentityUpsertResult:
     symbol_id: int
+    counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class AliasUpsertResult:
     counts: dict[str, int]
 
 
@@ -209,6 +219,25 @@ class SymbolMasterRepository:
             counts=counts,
         )
         return SymbolVendorIdentityUpsertResult(symbol_id=symbol_id, counts=counts)
+
+    def upsert_aliases_for_massive_candidate(
+        self,
+        *,
+        vendor_source_id: int,
+        raw_payload_id: int,
+        symbol_id: int,
+        candidate: MassiveTickerCandidate,
+    ) -> AliasUpsertResult:
+        """Upsert aliases for an already-upserted Massive symbol candidate.
+
+        This Slice 4 entrypoint deliberately writes only symbol aliases. Callers
+        must create or locate the symbol row first and pass its id here.
+        """
+
+        counts: dict[str, int] = {}
+        for alias in map_massive_alias_candidates(candidate):
+            self._upsert_alias(vendor_source_id, raw_payload_id, symbol_id, alias, counts)
+        return AliasUpsertResult(counts=counts)
 
     def _upsert_exchange(self, exchange: ExchangeCandidate | MassiveExchangeCandidate, counts: dict[str, int]) -> int:
         row = self.connection.execute(
@@ -610,7 +639,7 @@ class SymbolMasterRepository:
         vendor_source_id: int,
         raw_payload_id: int,
         symbol_id: int,
-        alias: AliasCandidate,
+        alias: AliasCandidate | MassiveAliasCandidate,
         counts: dict[str, int],
     ) -> None:
         row = self.connection.execute(

@@ -39,6 +39,14 @@ class MassiveExchangeCandidate:
     provisional: bool = False
 
 
+@dataclass(frozen=True)
+class MassiveAliasCandidate:
+    """Alias row candidate derived from a normalized Massive ticker record."""
+
+    alias_type: str
+    alias_value: str
+
+
 KNOWN_MASSIVE_EXCHANGES = {
     "XNYS": "New York Stock Exchange",
     "XNAS": "Nasdaq Stock Market",
@@ -92,6 +100,22 @@ def map_massive_exchange_candidate(candidate: MassiveTickerCandidate) -> Massive
     return MassiveExchangeCandidate(mic=mic, name=name)
 
 
+def map_massive_alias_candidates(candidate: MassiveTickerCandidate) -> tuple[MassiveAliasCandidate, ...]:
+    """Map lookup aliases from a Massive ticker candidate.
+
+    Alias derivation is pure and intentionally limited to fields already present
+    on the Slice 1 candidate. Empty optional identifiers are skipped.
+    """
+
+    aliases = (
+        _alias("ticker", candidate.source_ticker),
+        _alias("cik", candidate.cik),
+        _alias("composite_figi", candidate.composite_figi),
+        _alias("share_class_figi", candidate.share_class_figi),
+    )
+    return tuple(dict.fromkeys(alias for alias in aliases if alias is not None))
+
+
 def _map_security_type(provider_type: str | None) -> tuple[str, str]:
     normalized = provider_type.upper() if provider_type is not None else None
     if normalized == "CS":
@@ -103,6 +127,12 @@ def _map_security_type(provider_type: str | None) -> tuple[str, str]:
 
 def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _alias(alias_type: str, value: str | None) -> MassiveAliasCandidate | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return MassiveAliasCandidate(alias_type=alias_type, alias_value=value.strip())
 
 
 def _parse_timestamp(value: str | None) -> datetime | None:
