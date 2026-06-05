@@ -56,6 +56,23 @@ MASSIVE_API_KEY=... quant-symbols-massive --live --ticker AAPL --limit 1
 Normal tests use mocked HTTP responses and do not require a live Massive/Polygon
 API key.
 
+## CLI Entry Points
+
+The project has two separate CLI surfaces:
+
+- Database/Alembic and symbol normalization commands use `python3 -m quant_symbols.cli`.
+- The retrieval-only Massive/Polygon smoke check uses the `quant-symbols-massive` console script.
+
+`python3 -m quant_symbols.cli db ...` remains supported after installation
+because the CLI wrapper is present under `src/quant_symbols/cli.py`. The
+top-level `quant_symbols/cli.py` wrapper preserves checkout execution from the
+repository root.
+
+Do not document `python3 -m quant_symbols.cli vendors massive ...` as a supported
+Massive smoke command. That command family is not implemented. The Massive
+client smoke CLI also does not implement `--fixture`, `--dry-run`, `--market`,
+or `--active`; fixture dry-run behavior belongs to `symbols sync`.
+
 ## Day 4 Symbol Normalization Sync
 
 The repository now includes a narrow symbol-master sync slice under
@@ -117,3 +134,60 @@ The current Day 2 schema does not include a separate raw page/request diagnostic
 table or request URL column. This implementation stores exact raw result payloads
 unchanged, stores request parameters on `vendor_api_runs`, and records failure
 messages on failed runs.
+
+## Issue Workflow And Delegated Labels
+
+Daily scope/source issues and engineering-manager design comments are not
+delegated implementation assignments by default. The expected workflow is:
+
+- the architect opens the daily issue
+- the engineering manager posts implementation/spec handoff as a comment on the same issue
+- role-specific sections live in that comment
+- separate specialist issues are created only when Jar explicitly asks for them
+- delegated labels are reserved for actual implementation assignments
+
+For Day 5 cleanup, issues `#12`, `#13`, and `#14` are superseded by `#11` and
+are already closed. The delegated labels were removed from `#11`, `#12`, `#13`,
+and `#14` on 2026-06-05.
+
+## Jar Verification Handoff
+
+Run these from the host after installing the package in the active Python 3.12
+environment:
+
+```bash
+python3 -m pytest -q
+python3 -m quant_symbols.cli db --help
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive --dry-run
+quant-symbols-massive
+```
+
+Expected signs of success:
+
+- pytest exits zero
+- `db --help` lists `upgrade`, `verify`, and `downgrade-base`
+- fixture dry-run prints a `symbols_sync=ok` summary and does not require a database or `MASSIVE_API_KEY`
+- `quant-symbols-massive` prints `live check disabled; pass --live with MASSIVE_API_KEY set`
+
+Database verification requires a running local Postgres service with the Day 2
+schema:
+
+```bash
+docker compose up -d postgres
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli db verify
+```
+
+`python3 -m quant_symbols.cli db verify` should print a `postgres=ok` summary.
+Stop the service without deleting data with `docker compose stop postgres`, or
+delete the local Postgres volume with `docker compose down -v`.
+
+Optional live Massive validation requires a real key and should be run only when
+provider access is intended:
+
+```bash
+MASSIVE_API_KEY=... quant-symbols-massive --live --ticker AAPL --limit 1
+```
+
+Expected output is JSON containing `status`, `count`, `request_id`, and
+`tickers`. Do not commit or paste a real `MASSIVE_API_KEY`.
