@@ -624,3 +624,67 @@ python3 -m pytest -q
 
 Cleanup after optional Docker validation is `docker compose down`, or
 `docker compose down -v` if the local Postgres volume should be deleted.
+
+## Issue 35 Slice 4 Alias Persistence
+
+The #35 Slice 4 alias path is implemented by
+`map_massive_alias_candidates` in
+`src/quant_symbols/symbol_master/normalization.py` and
+`SymbolMasterRepository.upsert_aliases_for_massive_candidate` in
+`src/quant_symbols/symbol_master/repository.py`.
+
+`map_massive_alias_candidates` accepts the Slice 1 `MassiveTickerCandidate` and
+derives lookup aliases from fields already present on that candidate. The stable
+alias types currently written are:
+
+- `ticker` from the Massive source ticker
+- `cik` from the candidate CIK
+- `composite_figi` from the candidate composite FIGI
+- `share_class_figi` from the candidate share-class FIGI
+
+Blank or missing alias values are skipped. The mapper is pure and does not call
+Massive/Polygon, touch the database, mutate the raw provider dictionary, score
+quality, or decide tradability.
+
+`SymbolMasterRepository.upsert_aliases_for_massive_candidate` writes only
+`symbol_master.symbol_aliases` for an already-upserted symbol id. It selects by
+active `alias_type + lower(alias_value)` and inserts the alias with
+`source_vendor_id` and `source_payload_id` when missing. Repeated calls are
+idempotent and count existing aliases as unchanged; they do not create duplicate
+alias rows or update symbol, vendor ID, exchange, raw payload, or vendor run
+tables.
+
+Focused tests live in `tests/test_symbol_master_alias_upsert.py`. They use a
+fake connection abstraction and fail if the Slice 4 entrypoint touches
+non-alias symbol-master tables.
+
+Verified commands:
+
+```bash
+python3 -m pytest tests/test_symbol_master_alias_upsert.py -q
+python3 -m pytest tests/test_symbol_master_normalization.py tests/test_symbol_master_symbol_vendor_upsert.py tests/test_symbol_master_exchange_upsert.py -q
+python3 -m pytest -q
+```
+
+Observed output:
+
+```text
+6 passed
+19 passed
+95 passed
+```
+
+This slice does not require Docker/Postgres or `MASSIVE_API_KEY`. It does not
+call Massive/Polygon, run a full symbol sync, add migrations, persist symbol
+rows, persist vendor IDs, or add a normalize-raw operator command. Optional
+Postgres verification for Jar from a dependency-installed checkout is:
+
+```bash
+docker compose up -d postgres
+python3 -m quant_symbols.cli db upgrade
+python3 -m pytest tests/test_symbol_master_alias_upsert.py -q
+python3 -m pytest -q
+```
+
+Cleanup after optional Docker validation is `docker compose down`, or
+`docker compose down -v` if the local Postgres volume should be deleted.
