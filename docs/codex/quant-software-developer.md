@@ -50,7 +50,7 @@ Manual live check is disabled unless explicitly enabled:
 
 ```bash
 python3 -m quant_symbols.vendors.massive.cli
-MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live --ticker AAPL --limit 1
+MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live
 ```
 
 Normal tests use mocked HTTP responses and do not require a live Massive/Polygon
@@ -72,8 +72,8 @@ repository root.
 
 Do not document `python3 -m quant_symbols.cli vendors massive ...` as a supported
 Massive smoke command. That command family is not implemented. The Massive
-client smoke CLI also does not implement `--fixture`, `--dry-run`, `--market`,
-or `--active`.
+client smoke CLI also does not implement `--ticker`, `--limit`, `--fixture`,
+`--dry-run`, `--market`, or `--active`.
 
 Do not use `python3 -m quant_symbols.cli symbols sync ...` as proof that the
 Massive client smoke CLI works. That command belongs to the symbol-master sync
@@ -166,6 +166,7 @@ environment when reviewing the Massive client / documentation cleanup:
 
 ```bash
 python3 -m pytest -q
+python3 -m quant_symbols.vendors.massive.cli --help
 python3 -m quant_symbols.cli db --help
 python3 -m quant_symbols.vendors.massive.cli
 ```
@@ -173,6 +174,7 @@ python3 -m quant_symbols.vendors.massive.cli
 Expected signs of success:
 
 - pytest exits zero
+- `python3 -m quant_symbols.vendors.massive.cli --help` documents `--live`
 - `db --help` lists `upgrade`, `verify`, and `downgrade-base`
 - `python3 -m quant_symbols.vendors.massive.cli` prints `live check disabled; pass --live with MASSIVE_API_KEY set`
 
@@ -203,7 +205,7 @@ Optional live Massive validation requires a real key and should be run only when
 provider access is intended:
 
 ```bash
-MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live --ticker AAPL --limit 1
+MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live
 ```
 
 Expected output is JSON containing `status`, `count`, `request_id`, and

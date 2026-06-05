@@ -17,8 +17,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow a real Massive/Polygon API request; disabled by default",
     )
-    parser.add_argument("--ticker", default="AAPL", help="ticker to request during the live check")
-    parser.add_argument("--limit", type=int, default=1, help="page size for the live check")
     return parser
 
 
@@ -30,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         client = MassiveClient.from_env()
-        page = next(client.iter_ticker_pages(ticker=args.ticker, limit=args.limit, max_pages=1))
+        page = next(client.iter_ticker_pages(ticker="AAPL", limit=1, max_pages=1))
     except StopIteration:
         print("no ticker results returned")
         return 1
