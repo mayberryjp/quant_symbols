@@ -230,6 +230,80 @@ python3 -m quant_symbols.cli db verify
 Cleanup after optional Docker validation is `docker compose down` or
 `docker compose down -v` if the local Postgres volume should be deleted.
 
+## Issue 29 Slice 5 Verification
+
+The #29 raw-fetch operator command is implemented on the existing Massive CLI:
+
+```bash
+python3 -m quant_symbols.vendors.massive.cli --raw-fetch --fixture tests/fixtures/massive/active_stock.json --ticker AAPL --limit 1
+```
+
+The command loads the fixture into `TickerReferencePage` objects and stores raw
+provider records through `MassiveRawPayloadStorageJob`. It writes one
+`vendor_api_runs` row and one `raw_vendor_payloads` row for the single-record
+fixture when the database schema is available. It does not call normalized
+symbol sync code and does not upsert `symbols`, `symbol_vendor_ids`,
+`symbol_aliases`, or `exchanges`.
+
+Fixture raw-fetch mode does not require `MASSIVE_API_KEY`, but it does require
+SQLAlchemy and a reachable database because it performs real raw storage. Jar
+verification from a dependency-installed checkout:
+
+```bash
+docker compose up -d postgres
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.vendors.massive.cli --raw-fetch --fixture tests/fixtures/massive/active_stock.json --ticker AAPL --limit 1
+```
+
+Expected output shape:
+
+```text
+massive_raw_fetch=ok run_id=<database id> mode=fixture status=ok records_seen=1 raw_payloads_inserted=1 errors=0
+```
+
+The `run_id` is database-assigned and changes between runs. Cleanup after
+database verification is `docker compose down`, or `docker compose down -v` if
+Jar wants to delete the local Postgres volume.
+
+Optional live raw fetch uses the same command with `--live` instead of
+`--fixture` and requires `MASSIVE_API_KEY`:
+
+```bash
+MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --raw-fetch --live --ticker AAPL --limit 1
+```
+
+The command stores request metadata containing mode, ticker, limit, and fixture
+path when present. It does not store or print the API key. In this checkout, the
+Postgres-backed raw-fetch command was not run because the Docker daemon is not
+available and the local Python environment does not have SQLAlchemy installed.
+The command path was still exercised by focused tests with injected client,
+engine, and storage fakes.
+
+Verified commands for this slice:
+
+```bash
+python3 -m pytest tests/test_massive_cli.py tests/test_massive_raw_storage.py -q
+python3 -m pytest -q
+python3 -m quant_symbols.vendors.massive.cli
+env -u MASSIVE_API_KEY python3 -m quant_symbols.vendors.massive.cli --raw-fetch --live
+```
+
+Observed output:
+
+```text
+..............                                                           [100%]
+14 passed in 0.04s
+......................................................................   [100%]
+70 passed in 0.09s
+live check disabled; pass --live with MASSIVE_API_KEY set
+massive client error: MASSIVE_API_KEY is required for live Massive/Polygon access
+```
+
+The focused CLI tests verify fixture mode without `MASSIVE_API_KEY`, live mode
+without a key failing before storage, live raw fetch with an injected fake
+client, raw storage through an injected fake job, and secret-safe summary and
+request parameters.
+
 ## CLI Entry Points
 
 The project has two separate CLI surfaces:
@@ -237,7 +311,8 @@ The project has two separate CLI surfaces:
 - Database/Alembic commands use `python3 -m quant_symbols.cli db ...`.
 - Symbol-master sync commands, when the Day 4 sync code is the work being
   reviewed, use `python3 -m quant_symbols.cli symbols ...`.
-- The Massive/Polygon client smoke check uses `python3 -m quant_symbols.vendors.massive.cli`.
+- The Massive/Polygon client smoke and raw-fetch checks use
+  `python3 -m quant_symbols.vendors.massive.cli`.
 
 `python3 -m quant_symbols.cli db ...` remains supported after installation
 because the CLI wrapper is present under `src/quant_symbols/cli.py`. The
@@ -246,8 +321,8 @@ repository root.
 
 Do not document `python3 -m quant_symbols.cli vendors massive ...` as a supported
 Massive smoke command. That command family is not implemented. The Massive
-client smoke CLI also does not implement `--fixture`, `--dry-run`, `--market`,
-or `--active`.
+client smoke CLI does not implement `--dry-run`, `--market`, or `--active`.
+`--fixture` is supported only with the raw-fetch command path.
 
 Do not use `python3 -m quant_symbols.cli symbols sync ...` as proof that the
 Massive client smoke CLI works. That command belongs to the symbol-master sync
