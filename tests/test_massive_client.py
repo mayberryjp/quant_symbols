@@ -9,6 +9,7 @@ import pytest
 from quant_symbols.vendors.massive import MassiveClient, MassiveConfig
 from quant_symbols.vendors.massive.errors import (
     MassiveAuthError,
+    MassiveHTTPError,
     MassiveMalformedPayloadError,
     MassiveRateLimitError,
     MassiveServerError,
@@ -25,9 +26,18 @@ class FakeTransport:
     def __init__(self, responses: list[TransportResponse] | None = None, *, raise_timeout: bool = False) -> None:
         self.responses = list(responses or [])
         self.raise_timeout = raise_timeout
+        self.requests: list[dict[str, object]] = []
         self.urls: list[str] = []
 
     def request(self, method: str, url: str, *, headers: dict[str, str], timeout: float) -> TransportResponse:
+        self.requests.append(
+            {
+                "method": method,
+                "url": url,
+                "headers": dict(headers),
+                "timeout": timeout,
+            }
+        )
         self.urls.append(url)
         if self.raise_timeout:
             raise MassiveTimeoutError("timeout")
@@ -59,6 +69,60 @@ def config(**kwargs: object) -> MassiveConfig:
     }
     values.update(kwargs)
     return MassiveConfig(**values)
+
+
+def test_get_ticker_reference_page_sends_one_expected_request(capsys: pytest.CaptureFixture[str]) -> None:
+    payload = {"status": "OK", "request_id": "abc", "count": 0, "results": []}
+    transport = FakeTransport([response(200, payload)])
+    client = MassiveClient(config(), transport=transport, sleep=lambda _: None)
+
+    returned = client.get_ticker_reference_page(ticker="AAPL", limit=1)
+
+    assert returned == payload
+    assert len(transport.requests) == 1
+    request = transport.requests[0]
+    assert request["method"] == "GET"
+    assert request["headers"] == {"Accept": "application/json", "User-Agent": "quant-symbols/0.1"}
+    assert request["timeout"] == 1.0
+
+    parsed = urlparse(str(request["url"]))
+    query = parse_qs(parsed.query)
+    assert parsed.path == "/v3/reference/tickers"
+    assert query["apiKey"] == ["test-key"]
+    assert query["ticker"] == ["AAPL"]
+    assert query["limit"] == ["1"]
+    assert "test-key" not in str(request["headers"])
+    assert "test-key" not in repr(client.config)
+    captured = capsys.readouterr()
+    assert "test-key" not in captured.out
+    assert "test-key" not in captured.err
+
+
+def test_get_ticker_reference_page_can_send_market_and_locale() -> None:
+    payload = {"status": "OK", "results": []}
+    transport = FakeTransport([response(200, payload)])
+    client = MassiveClient(config(), transport=transport, sleep=lambda _: None)
+
+    returned = client.get_ticker_reference_page(market="stocks", locale="us", limit=5)
+
+    parsed = urlparse(transport.urls[0])
+    query = parse_qs(parsed.query)
+    assert returned == payload
+    assert len(transport.requests) == 1
+    assert query["market"] == ["stocks"]
+    assert query["locale"] == ["us"]
+    assert query["limit"] == ["5"]
+
+
+def test_get_ticker_reference_page_raises_existing_http_error_for_failure() -> None:
+    transport = FakeTransport([response(400, {"status": "ERROR", "error": "bad request"})])
+    client = MassiveClient(config(), transport=transport, sleep=lambda _: None)
+
+    with pytest.raises(MassiveHTTPError) as exc_info:
+        client.get_ticker_reference_page(ticker="AAPL", limit=1)
+
+    assert exc_info.value.status_code == 400
+    assert len(transport.requests) == 1
 
 
 def test_client_success_preserves_provider_fields_and_raw_payload() -> None:

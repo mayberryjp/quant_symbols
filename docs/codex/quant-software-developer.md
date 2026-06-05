@@ -8,15 +8,19 @@ The repository now includes a retrieval-only Massive/Polygon vendor module under
 The module owns:
 
 - environment-based client configuration
+- one-page ticker-reference JSON requests through `MassiveClient.get_ticker_reference_page`
 - HTTP timeout, retry, exponential backoff, and `Retry-After` rate-limit handling
 - typed models for `/v3/reference/tickers` pages and ticker results
 - raw provider payload handoff objects for later ingestion code
 - a disabled-by-default manual live-check CLI
 
 The module does not write to Postgres and does not normalize payloads into symbol
-master tables. Later ingestion code should call `MassiveClient.iter_ticker_pages`
-or `MassiveClient.iter_ticker_payloads` and decide how to create vendor run
-records and raw payload rows.
+master tables. Code that only needs to prove the Massive/Polygon HTTP boundary
+can call `MassiveClient.get_ticker_reference_page(ticker="AAPL", limit=1)` to
+request one `/v3/reference/tickers` page and receive the decoded JSON object.
+Later ingestion code should call `MassiveClient.iter_ticker_pages` or
+`MassiveClient.iter_ticker_payloads` and decide how to create vendor run records
+and raw payload rows.
 
 ## Configuration
 
@@ -47,6 +51,8 @@ Instantiate from environment:
 from quant_symbols.vendors.massive import MassiveClient
 
 client = MassiveClient.from_env()
+page = client.get_ticker_reference_page(ticker="AAPL", limit=1)
+
 for payload in client.iter_ticker_payloads(market="stocks", locale="us", active=True, limit=1000):
     print(payload.provider_id, payload.payload)
 ```
