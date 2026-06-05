@@ -131,3 +131,27 @@ MASSIVE_API_KEY=... quant-symbols-massive --live --ticker AAPL --limit 1
 
 The first command is intentionally disabled and exits without making a network
 request. Pass `--live` only for a manual provider check.
+
+## Symbol Normalization Sync
+
+The Day 4 symbol sync entrypoint consumes Massive/Polygon ticker reference pages,
+maps them into symbol-master candidates, and can write raw payload and normalized
+records to the Day 2 `symbol_master` schema.
+
+Fixture dry-run does not require an API key or database:
+
+```bash
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive --dry-run
+```
+
+Database-backed fixture smoke flow:
+
+```bash
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive
+python3 -m quant_symbols.cli symbols sync-summary --latest
+```
+
+Live sync uses `MASSIVE_API_KEY` through `MassiveClient.from_env()` and supports
+`--max-pages`, `--active true|false|all`, `--market`, `--locale`, and `--limit`.

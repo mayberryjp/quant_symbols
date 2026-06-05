@@ -55,3 +55,65 @@ MASSIVE_API_KEY=... quant-symbols-massive --live --ticker AAPL --limit 1
 
 Normal tests use mocked HTTP responses and do not require a live Massive/Polygon
 API key.
+
+## Day 4 Symbol Normalization Sync
+
+The repository now includes a narrow symbol-master sync slice under
+`src/quant_symbols/symbol_master/`.
+
+Implemented modules:
+
+- `massive_sync.py`: sync orchestration for fixture and live Massive ticker pages
+- `massive_mapper.py`: pure mapping from `TickerReference` to normalized symbol candidates
+- `repository.py`: SQLAlchemy repository for `symbol_master` run, raw payload, exchange, symbol, vendor ID, and alias writes
+- `fixtures.py`: deterministic local fixture loading for smoke and tests
+- `summary.py`: counters and single-line summary formatting
+
+The sync command is available through the existing project CLI:
+
+```bash
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive --dry-run
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive
+python3 -m quant_symbols.cli symbols sync-summary --latest
+```
+
+Fixture dry-run mode does not require `MASSIVE_API_KEY`, SQLAlchemy, psycopg, or
+a running database. Database-backed fixture/live mode uses `DATABASE_URL` and the
+Day 2 `symbol_master` schema.
+
+Live mode constructs `MassiveClient.from_env()` and supports:
+
+- `--max-pages N`
+- `--active true|false|all`
+- `--market stocks`
+- `--locale us`
+- `--limit N`
+
+Mapper behavior:
+
+- Canonical ticker lookup values are uppercased while the source ticker remains preserved.
+- Missing names are allowed.
+- `type=CS` maps to `asset_class=equity`, `security_type=common_stock`.
+- `type=ETF` maps to `asset_class=fund`, `security_type=etf`.
+- ADR, REIT, warrant, unit, missing, and unsupported types are preserved through
+  source/raw fields and mapped to best-effort fallback security types.
+- Active and inactive records are preserved, including `delisted_utc` where it parses.
+- Unknown primary exchanges create provisional exchange candidates instead of
+  dropping the symbol.
+- `composite_figi` and `share_class_figi` become alias records when present.
+
+Database-backed sync behavior:
+
+- Creates one `symbol_master.vendor_api_runs` row per execution.
+- Inserts raw vendor records append-only into `symbol_master.raw_vendor_payloads`.
+- Upserts normalized `exchanges`, `symbols`, `symbol_vendor_ids`, and `symbol_aliases`.
+- Reuses existing symbols by composite FIGI when available, otherwise by
+  `locale + market + canonical_ticker`, including inactive rows.
+- Updates last-seen run and raw payload links on repeat observations while counting
+  unchanged domain records separately from changed domain records.
+- Marks failed runs as `failed` with partial counts and the exception message.
+
+The current Day 2 schema does not include a separate raw page/request diagnostics
+table or request URL column. This implementation stores exact raw result payloads
+unchanged, stores request parameters on `vendor_api_runs`, and records failure
+messages on failed runs.
