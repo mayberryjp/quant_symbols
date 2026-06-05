@@ -298,33 +298,42 @@ Each valid fixture should include at least:
 
 Do not require live fixture capture in normal test runs. If live capture tooling is added, it must be opt-in and must sanitize secrets before writing files.
 
-## CLI And Dry-Run Ergonomics
+## CLI Smoke Ergonomics
 
-Add a local smoke command that can run without hitting the live API:
+Implemented command source of truth:
 
 ```bash
-python3 -m quant_symbols.cli vendors massive tickers --fixture tests/fixtures/massive/tickers_active_stock_page1.json --dry-run
+quant-symbols-massive
+MASSIVE_API_KEY=... quant-symbols-massive --live --ticker AAPL --limit 1
 ```
 
-Expected output shape:
+The first command is intentionally disabled and exits without a network request:
 
 ```text
-vendor=massive endpoint=/v3/reference/tickers mode=fixture pages=1 records=2 first_ticker=AAPL writes=0
+live check disabled; pass --live with MASSIVE_API_KEY set
 ```
 
-Add an optional live command, but it must require an explicit flag:
+The live smoke command requires both `--live` and `MASSIVE_API_KEY`. It performs
+one retrieval-only `/v3/reference/tickers` check through
+`src/quant_symbols/vendors/massive/cli.py` and prints JSON containing the
+provider status, count, request id, and ticker list. It does not write to
+Postgres.
+
+The Massive client smoke CLI does not expose `vendors massive tickers`,
+`--fixture`, `--dry-run`, `--market`, or `--active`. Fixture dry-run belongs to
+the Day 4 symbol normalization command:
 
 ```bash
-python3 -m quant_symbols.cli vendors massive tickers --live --market stocks --active true --limit 100
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive --dry-run
 ```
 
-Rules:
+The database/Alembic CLI remains a separate command family:
 
-- Default command mode should be fixture or dry-run, not live API.
-- Dry-run must print summary counts and the first ticker key.
-- Dry-run must print `writes=0`.
-- Live mode must fail clearly if `MASSIVE_API_KEY` is missing.
-- CLI output must not include the API key.
+```bash
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli db verify
+python3 -m quant_symbols.cli db downgrade-base
+```
 
 ## Minimal Tests
 
@@ -346,7 +355,7 @@ Add tests for:
 - missing `results` raises typed DTO error
 - record with inactive status still yields a raw payload candidate
 - payload hash is deterministic regardless of JSON key order
-- dry-run fixture command exits zero and reports `writes=0`
+- retrieval-only smoke command exits zero without `--live` and does not make a network request
 
 Use mocked HTTP transports. No default test may call the live Massive/Polygon API.
 
@@ -359,8 +368,10 @@ Use mocked HTTP transports. No default test may call the live Massive/Polygon AP
 - Typed DTOs preserve provider fields and isolate them from normalized DB models.
 - Raw payload candidates contain enough metadata for future `vendor_api_runs` and `raw_vendor_payloads` inserts.
 - Fixtures cover active stock, inactive stock, ETF, ADR, renamed-symbol style, pagination, and malformed payload cases.
-- Unit tests cover pagination, retryable failure, auth/config missing, fixture parsing, DTO validation, hash determinism, and dry-run CLI behavior.
-- Local fixture smoke command runs without a live API key and reports zero writes.
+- Unit tests cover pagination, retryable failure, auth/config missing, fixture parsing, DTO validation, hash determinism, and disabled smoke CLI behavior.
+- Local Massive smoke command runs without a live API key and reports that live
+  checks are disabled. Day 4 fixture dry-run uses `python3 -m quant_symbols.cli
+  symbols sync --fixture tests/fixtures/massive --dry-run`.
 
 ## Out Of Scope
 
@@ -379,8 +390,8 @@ Use mocked HTTP transports. No default test may call the live Massive/Polygon AP
 3. Add HTTP abstraction with mocked tests.
 4. Add Massive `/v3/reference/tickers` DTOs and fixture parsing.
 5. Add pagination and raw payload candidate generation.
-6. Add CLI dry-run command.
-7. Add optional live command only after dry-run and mocked tests pass.
+6. Add a disabled-by-default Massive smoke CLI.
+7. Add optional live command behavior only behind an explicit `--live` flag.
 
 ## Codex Handoff Notes
 
@@ -389,7 +400,7 @@ Keep the vendor client boring and explicit. The important boundary is that it re
 When posting validation evidence back to the issue or channel, include:
 
 - exact pytest command
-- dry-run fixture command and output
+- disabled Massive smoke command and output
 - confirmation that no tests required a live API key
 - confirmation that CLI output redacts or omits secrets
 - any live API check only if explicitly run with `--live`
