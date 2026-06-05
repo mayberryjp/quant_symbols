@@ -8,11 +8,18 @@ import json
 from typing import Any
 
 from quant_symbols.symbol_master.massive_mapper import AliasCandidate, ExchangeCandidate, SymbolCandidate
+from quant_symbols.symbol_master.normalization import MassiveExchangeCandidate
 
 
 @dataclass(frozen=True)
 class RawPayloadLink:
     id: int
+
+
+@dataclass(frozen=True)
+class ExchangeUpsertResult:
+    exchange_id: int | None
+    counts: dict[str, int]
 
 
 class SymbolMasterRepository:
@@ -159,7 +166,15 @@ class SymbolMasterRepository:
         ).mappings().first()
         return dict(row) if row is not None else None
 
-    def _upsert_exchange(self, exchange: ExchangeCandidate, counts: dict[str, int]) -> int:
+    def upsert_exchange_candidate(self, exchange: MassiveExchangeCandidate | None) -> ExchangeUpsertResult:
+        counts: dict[str, int] = {}
+        if exchange is None:
+            _increment(counts, "exchanges_skipped")
+            return ExchangeUpsertResult(exchange_id=None, counts=counts)
+        exchange_id = self._upsert_exchange(exchange, counts)
+        return ExchangeUpsertResult(exchange_id=exchange_id, counts=counts)
+
+    def _upsert_exchange(self, exchange: ExchangeCandidate | MassiveExchangeCandidate, counts: dict[str, int]) -> int:
         row = self.connection.execute(
             _text("SELECT id, name FROM symbol_master.exchanges WHERE mic = :mic"),
             {"mic": exchange.mic},

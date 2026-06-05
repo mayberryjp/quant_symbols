@@ -30,6 +30,24 @@ class MassiveTickerCandidate:
     raw_record: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class MassiveExchangeCandidate:
+    """Exchange row candidate derived from a normalized Massive ticker record."""
+
+    mic: str
+    name: str
+    provisional: bool = False
+
+
+KNOWN_MASSIVE_EXCHANGES = {
+    "XNYS": "New York Stock Exchange",
+    "XNAS": "Nasdaq Stock Market",
+    "ARCX": "NYSE Arca",
+    "BATS": "Cboe BZX Exchange",
+    "OTCM": "OTC Markets",
+}
+
+
 def map_massive_ticker_raw_record(raw_record: dict[str, Any]) -> MassiveTickerCandidate:
     """Map one raw Massive ticker dictionary to a normalized candidate.
 
@@ -58,6 +76,20 @@ def map_massive_ticker_raw_record(raw_record: dict[str, Any]) -> MassiveTickerCa
         delisted_utc=_parse_timestamp(_optional_str(raw_record.get("delisted_utc"))),
         raw_record=dict(raw_record),
     )
+
+
+def map_massive_exchange_candidate(candidate: MassiveTickerCandidate) -> MassiveExchangeCandidate | None:
+    """Map primary exchange data from a ticker candidate to an exchange candidate."""
+
+    if candidate.primary_exchange_code is None:
+        return None
+    mic = candidate.primary_exchange_code.strip().upper()
+    if not mic:
+        return None
+    name = KNOWN_MASSIVE_EXCHANGES.get(mic)
+    if name is None:
+        return MassiveExchangeCandidate(mic=mic, name=f"Unmapped exchange {mic}", provisional=True)
+    return MassiveExchangeCandidate(mic=mic, name=name)
 
 
 def _map_security_type(provider_type: str | None) -> tuple[str, str]:
