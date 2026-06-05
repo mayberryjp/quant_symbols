@@ -12,9 +12,11 @@ Implement the Massive/Polygon reference-data client that can fetch `/v3/referenc
 
 The client must stop at retrieval, validation, metadata capture, and raw record handoff. It must not normalize into canonical symbols and must not write to Postgres in this scope.
 
-## Required Repository Changes
+## Implemented Repository Layout
 
-Add or complete these files once the Day 2 package layout exists:
+The original Day 3 proposal used placeholder package names. The checked-in code
+now uses the paths below. Use these as the source of truth when extending or
+debugging the Massive/Polygon client.
 
 ```text
 .
@@ -23,41 +25,48 @@ Add or complete these files once the Day 2 package layout exists:
 ├── src/
 │   └── quant_symbols/
 │       ├── cli.py
-│       ├── config.py
-│       ├── market_data_vendor/
+│       ├── _cli_impl.py
+│       ├── vendors/
 │       │   ├── __init__.py
-│       │   ├── errors.py
-│       │   ├── http.py
 │       │   └── massive/
 │       │       ├── __init__.py
 │       │       ├── client.py
 │       │       ├── config.py
-│       │       ├── dto.py
-│       │       └── fixtures.py
+│       │       ├── errors.py
+│       │       ├── models.py
+│       │       ├── transport.py
+│       │       └── cli.py
 │       └── symbol_master/
 │           ├── __init__.py
-│           └── vendor_payloads.py
+│           ├── fixtures.py
+│           ├── massive_mapper.py
+│           ├── massive_sync.py
+│           ├── repository.py
+│           └── summary.py
+├── quant_symbols/
+│   ├── __init__.py
+│   └── cli.py
 └── tests/
     ├── fixtures/
     │   └── massive/
-    │       ├── tickers_active_stock_page1.json
-    │       ├── tickers_active_stock_page2.json
-    │       ├── tickers_inactive_stock_page1.json
-    │       ├── tickers_active_etf_page1.json
-    │       ├── tickers_active_adr_page1.json
-    │       ├── tickers_renamed_symbol_page1.json
-    │       └── tickers_malformed_missing_results.json
+    │       ├── active_stock.json
+    │       ├── inactive_stock.json
+    │       ├── etf.json
+    │       ├── adr.json
+    │       └── renamed_symbol.json
     ├── test_massive_client.py
-    ├── test_massive_config.py
-    ├── test_massive_dto.py
-    └── test_massive_dry_run.py
+    ├── test_schema_contract.py
+    ├── test_symbol_master_mapper.py
+    └── test_symbol_master_sync.py
 ```
 
-If Day 2 implementation uses a different package root, keep the existing root and preserve the same internal boundaries.
+The top-level `quant_symbols/` package is a checkout-time bridge so
+`python3 -m quant_symbols.cli ...` works from the repository root. The installed
+runtime package lives under `src/quant_symbols/`.
 
 ## Module Boundaries
 
-### `market_data_vendor`
+### `quant_symbols.vendors`
 
 Owns vendor access concerns:
 
@@ -71,17 +80,18 @@ Owns vendor access concerns:
 
 It must not import DB session helpers, Alembic code, or normalized symbol models.
 
-### `market_data_vendor.massive`
+### `quant_symbols.vendors.massive`
 
 Owns the Massive/Polygon API contract for `/v3/reference/tickers`.
 
 Use `massive` as the internal source code because Day 2 seeds `vendor_sources.code = 'massive'`. Human-facing labels may say `Massive / Polygon`, and request metadata should preserve the configured base URL.
 
-### `symbol_master.vendor_payloads`
+### `quant_symbols.symbol_master`
 
-Defines neutral handoff objects that Day 4 can persist into `symbol_master.vendor_api_runs` and `symbol_master.raw_vendor_payloads`.
-
-This module may contain dataclasses or Pydantic models only. It must not write to Postgres during Day 3.
+Owns Day 4 ingestion and normalization behavior. This layer may use
+`MassiveClient` output, create `vendor_api_runs`, append `raw_vendor_payloads`,
+and upsert normalized symbol-master records. The Massive client must not import
+this layer.
 
 ## Configuration Contract
 
@@ -89,12 +99,10 @@ Add environment-backed config for:
 
 - `MASSIVE_API_KEY`
 - `MASSIVE_BASE_URL`, default `https://api.polygon.io`
-- `MASSIVE_TIMEOUT_SECONDS`, default `20`
-- `MASSIVE_MAX_RETRIES`, default `3`
-- `MASSIVE_BACKOFF_INITIAL_SECONDS`, default `0.5`
-- `MASSIVE_BACKOFF_MAX_SECONDS`, default `8`
-- `MASSIVE_RATE_LIMIT_SLEEP_SECONDS`, default `60`
-- `MASSIVE_USER_AGENT`, default project-specific value such as `quant-symbols/0.1`
+- `MASSIVE_TIMEOUT_SECONDS`, default `30`
+- `MASSIVE_RETRY_COUNT`, default `3`
+- `MASSIVE_BACKOFF_SECONDS`, default `0.5`
+- `MASSIVE_BACKOFF_MULTIPLIER`, default `2`
 
 Rules:
 
@@ -105,19 +113,19 @@ Rules:
 
 ## HTTP Client Contract
 
-Prefer `httpx` for the HTTP implementation because it supports timeouts, test transports, and clear exception types. `requests` is acceptable only if the project already standardizes on it before Day 3 starts.
+The implemented client uses a tiny transport wrapper in
+`src/quant_symbols/vendors/massive/transport.py` so tests can pass a fake
+transport without live HTTP calls. It currently uses the standard library
+`urllib` under that wrapper.
 
-Expose a small vendor-neutral response wrapper from `market_data_vendor.http`:
+Implemented transport response:
 
 ```python
 @dataclass(frozen=True)
-class VendorHttpResponse:
+class TransportResponse:
     status_code: int
-    url: str
-    request_headers: Mapping[str, str]
-    response_headers: Mapping[str, str]
-    json_body: Mapping[str, Any]
-    elapsed_ms: int | None
+    headers: Mapping[str, str]
+    body: bytes
 ```
 
 The low-level client must:
@@ -150,22 +158,23 @@ Non-retryable responses:
 
 ## Massive Tickers API Contract
 
-Implement a client method equivalent to:
+Implemented client methods:
 
 ```python
-class MassiveReferenceClient:
-    def iter_tickers(
+class MassiveClient:
+    def iter_ticker_pages(
         self,
         *,
-        market: str = "stocks",
-        active: bool | None = True,
-        ticker_type: str | None = None,
-        locale: str | None = "us",
-        limit: int = 1000,
-        sort: str | None = "ticker",
-        order: str | None = "asc",
-        extra_params: Mapping[str, str | int | bool] | None = None,
-    ) -> Iterator[VendorTickerPage]:
+        ticker: str | None = None,
+        market: str | None = None,
+        locale: str | None = None,
+        active: bool | None = None,
+        limit: int | None = None,
+        max_pages: int | None = None,
+    ) -> Iterator[TickerReferencePage]:
+        ...
+
+    def iter_ticker_payloads(self, **kwargs: Any) -> Iterator[RawVendorPayload]:
         ...
 ```
 
@@ -174,115 +183,101 @@ Parameter rules:
 - `active=True` discovers active listings.
 - `active=False` discovers inactive or delisted listings.
 - `active=None` omits the active parameter if the provider supports an all-status query.
-- `ticker_type="CS"` should be usable for common stocks.
-- `ticker_type="ETF"` should be usable for ETFs.
-- Preserve custom `extra_params` for future provider filters, but reject collisions with explicitly supported method parameters.
+- `ticker` narrows a live smoke request to one symbol.
+- `market`, `locale`, `limit`, and `max_pages` are passed through by the live
+  sync path.
+- The current client does not expose `ticker_type`, `sort`, `order`, or
+  `extra_params`. Add and test those before documenting them as supported.
 
 Pagination rules:
 
 - Follow the provider `next_url` until absent.
-- Track page number starting at `1`.
 - Use `next_url` as returned by the vendor, while still applying auth safely if the next URL omits the key.
 - Stop only after yielding the final page.
-- Detect repeated `next_url` values and raise a pagination error to avoid infinite loops.
+- The current client does not detect repeated `next_url` values. Add that guard
+  in a future issue before relying on it for live full-universe sync safety.
 
 ## DTO Layer
 
 Use Pydantic models if it is already in the Day 2 dependency set; otherwise use frozen dataclasses plus explicit validation. The DTO layer must isolate provider shape from normalized DB shape.
 
-Required page DTO:
+Implemented page model:
 
 ```python
 @dataclass(frozen=True)
-class VendorTickerPage:
-    vendor_source_code: Literal["massive"]
-    endpoint: Literal["/v3/reference/tickers"]
+class TickerReferencePage:
     request_url: str
-    request_params: Mapping[str, Any]
-    page_number: int
-    status_code: int
+    raw: dict[str, Any]
+    results: tuple[TickerReference, ...]
     next_url: str | None
+    status: str | None
     count: int | None
-    results: Sequence[VendorTickerRecord]
-    raw_page: Mapping[str, Any]
-    response_headers: Mapping[str, str]
-    elapsed_ms: int | None
+    request_id: str | None
+    fetched_at: datetime | None
 ```
 
-Required record DTO:
+Implemented record model:
 
 ```python
 @dataclass(frozen=True)
-class VendorTickerRecord:
-    vendor_source_code: Literal["massive"]
-    endpoint: Literal["/v3/reference/tickers"]
-    vendor_record_key: str
-    page_number: int
-    payload: Mapping[str, Any]
+class TickerReference:
+    ticker: str
+    raw: dict[str, Any]
+    name: str | None
+    market: str | None
+    locale: str | None
+    primary_exchange: str | None
+    type: str | None
+    active: bool | None
+    currency_name: str | None
+    cik: str | None
+    composite_figi: str | None
+    share_class_figi: str | None
+    last_updated_utc: str | None
+    delisted_utc: str | None
 ```
-
-`vendor_record_key` should be the vendor ticker value for `/v3/reference/tickers`.
 
 Record payload rules:
 
-- Preserve the exact vendor result object in `payload`.
-- Do not rename vendor fields inside the DTO payload.
+- Preserve the exact vendor result object in `raw`.
+- Do not rename vendor fields inside the DTO.
 - Do not derive canonical symbol fields in this layer.
 - Validate that each result is an object and has a non-empty `ticker`.
 - Allow inactive, ETF, ADR, renamed, delisted, and OTC-like records to pass through.
 
 ## Raw Payload Handoff Contract
 
-Add a Day 4-ready neutral model:
+Implemented neutral handoff model:
 
 ```python
 @dataclass(frozen=True)
-class RawVendorPayloadCandidate:
-    vendor_source_code: str
+class RawVendorPayload:
+    vendor: str
     endpoint: str
-    vendor_record_key: str | None
-    page_number: int | None
-    payload: Mapping[str, Any]
-    payload_hash: str
-    observed_at: datetime
-    request_metadata: Mapping[str, Any]
+    provider_id: str
+    fetched_at: datetime
+    request_url: str
+    payload: dict[str, Any]
 ```
 
-Hashing rules:
-
-- `payload_hash` must be deterministic across key order changes.
-- Use canonical JSON serialization with sorted keys and compact separators.
-- Hash with SHA-256 and store hex digest.
-- Hash the per-record vendor payload, not the whole page.
-
-Request metadata should include:
-
-- endpoint
-- sanitized request params
-- page number
-- status code
-- response headers useful for rate diagnostics
-- elapsed milliseconds if available
-- next URL presence as boolean
-- vendor source code
-
-Metadata must not include the API key.
+`TickerReferencePage.raw_vendor_payloads()` returns these records. The request
+URL is sanitized so the API key is not exposed. The current handoff model does
+not include a payload hash or full response headers; add those in a future issue
+before relying on them.
 
 ## Fixture Capture
 
-Add representative static fixtures under `tests/fixtures/massive/`.
+Representative static fixtures live under `tests/fixtures/massive/`.
 
 Fixtures must be sanitized and small. They should preserve real provider field names, but may use synthetic tickers if necessary to avoid licensing or account leakage.
 
 Required fixture scenarios:
 
-- active U.S. common stock page with `next_url`
-- active U.S. common stock final page without `next_url`
-- inactive or delisted stock page
-- active ETF page
-- active ADR page
-- renamed or changed-symbol style record if available from captured provider shape
-- malformed page missing `results`
+- active U.S. common stock
+- inactive or delisted common stock
+- active ETF
+- active ADR
+- renamed or changed-symbol style record
 
 Each valid fixture should include at least:
 
@@ -341,20 +336,16 @@ Add tests for:
 
 - config loads defaults from env and hides the API key in repr/error output
 - live config fails when `MASSIVE_API_KEY` is missing
-- fixture mode works without `MASSIVE_API_KEY`
+- fixture-based symbol sync works without `MASSIVE_API_KEY`
 - successful single-page parsing
 - successful multi-page pagination using mocked HTTP
-- `active=True`, `active=False`, and `active=None` request parameter behavior
-- ETF ticker-type request parameter behavior
+- representative fixture parsing for common stock, inactive stock, ETF, ADR, and renamed symbol
 - retryable `500` succeeds after retry
 - retryable `429` honors mocked `Retry-After`
 - non-retryable `401` raises auth error
 - request timeout raises typed timeout error
-- repeated `next_url` raises pagination error
-- malformed JSON raises typed response error
 - missing `results` raises typed DTO error
 - record with inactive status still yields a raw payload candidate
-- payload hash is deterministic regardless of JSON key order
 - retrieval-only smoke command exits zero without `--live` and does not make a network request
 
 Use mocked HTTP transports. No default test may call the live Massive/Polygon API.
@@ -363,12 +354,12 @@ Use mocked HTTP transports. No default test may call the live Massive/Polygon AP
 
 - Client can iterate all ticker pages without exposing vendor payload shape to normalized symbol-master models.
 - Client supports active and inactive/delisted discovery parameters.
-- Client supports ETF discovery parameters without excluding leveraged, inverse, or index ETFs.
+- ETF, ADR, renamed-symbol, active, and inactive records are preserved by fixtures and tests.
 - Retry, backoff, timeout, and rate-limit settings are configurable.
 - Typed DTOs preserve provider fields and isolate them from normalized DB models.
-- Raw payload candidates contain enough metadata for future `vendor_api_runs` and `raw_vendor_payloads` inserts.
-- Fixtures cover active stock, inactive stock, ETF, ADR, renamed-symbol style, pagination, and malformed payload cases.
-- Unit tests cover pagination, retryable failure, auth/config missing, fixture parsing, DTO validation, hash determinism, and disabled smoke CLI behavior.
+- Raw payload handoff records contain enough metadata for current `raw_vendor_payloads` inserts.
+- Fixtures cover active stock, inactive stock, ETF, ADR, renamed-symbol style, and mocked pagination cases.
+- Unit tests cover pagination, retryable failure, auth/config loading, fixture parsing, DTO validation, and disabled smoke CLI behavior.
 - Local Massive smoke command runs without a live API key and reports that live
   checks are disabled. Day 4 fixture dry-run uses `python3 -m quant_symbols.cli
   symbols sync --fixture tests/fixtures/massive --dry-run`.

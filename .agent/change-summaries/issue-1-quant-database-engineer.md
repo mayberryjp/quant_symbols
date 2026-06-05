@@ -26,7 +26,7 @@
 
 ### Code impact
 - Added `src/quant_pipeline` package skeleton.
-- Added `python -m quant_pipeline.infra.smoke` to verify database connectivity, Alembic head, and the six expected `symbol_master` tables.
+- Added `python3 -m quant_pipeline.infra.smoke` to verify database connectivity, Alembic head, and the six expected `symbol_master` tables.
 - No Massive/Polygon API client, ingestion job, market-data download, or signal logic was added.
 
 ### Files changed

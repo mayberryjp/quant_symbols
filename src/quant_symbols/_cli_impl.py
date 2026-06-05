@@ -167,7 +167,7 @@ def symbols_sync_summary(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m quant_symbols.cli")
+    parser = argparse.ArgumentParser(prog="python3 -m quant_symbols.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     db_parser = subparsers.add_parser("db")

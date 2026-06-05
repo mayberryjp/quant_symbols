@@ -26,9 +26,9 @@
 
 ### Code impact
 - Adds the `quant_symbols` Python package.
-- Adds `python -m quant_symbols.cli db upgrade`.
-- Adds `python -m quant_symbols.cli db verify`.
-- Adds `python -m quant_symbols.cli db downgrade-base`.
+- Adds `python3 -m quant_symbols.cli db upgrade`.
+- Adds `python3 -m quant_symbols.cli db verify`.
+- Adds `python3 -m quant_symbols.cli db downgrade-base`.
 
 ### Files changed
 - `pyproject.toml`
@@ -50,7 +50,7 @@
 
 ### Testing / validation
 - Static tests passed with `pytest -q`.
-- Python compile validation passed with `python -m compileall quant_symbols alembic tests`.
+- Python compile validation passed with `python3 -m compileall quant_symbols alembic tests`.
 - Offline Alembic SQL generation passed with `alembic upgrade head --sql`.
 - Offline Alembic downgrade SQL generation passed with `alembic downgrade 0001_symbol_master_vendor_traceability:base --sql`.
 - Live Docker/Postgres validation is pending because the agent runtime could not connect to the Docker daemon.
