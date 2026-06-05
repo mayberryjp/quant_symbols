@@ -133,8 +133,8 @@ require a Massive/Polygon API key.
 Manual live check:
 
 ```bash
-quant-symbols-massive
-MASSIVE_API_KEY=... quant-symbols-massive --live --ticker AAPL --limit 1
+python3 -m quant_symbols.vendors.massive.cli
+MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live --ticker AAPL --limit 1
 ```
 
 The first command is intentionally disabled and exits without making a network
@@ -142,9 +142,15 @@ request. Pass `--live` only for a manual provider check.
 
 ## Symbol Normalization Sync
 
-The Day 4 symbol sync entrypoint consumes Massive/Polygon ticker reference pages,
-maps them into symbol-master candidates, and can write raw payload and normalized
-records to the Day 2 `symbol_master` schema.
+This is not the Massive client smoke test. Use
+`python3 -m quant_symbols.vendors.massive.cli` when you only want to prove that
+the Massive/Polygon client starts and, when explicitly enabled, can make a
+provider request.
+
+The Day 4 symbol-master sync is a separate project/operator command. It consumes
+Massive/Polygon ticker reference pages, maps them into symbol-master candidates,
+and can write raw payload and normalized records to the Day 2 `symbol_master`
+schema.
 
 Fixture dry-run does not require an API key or database:
 
