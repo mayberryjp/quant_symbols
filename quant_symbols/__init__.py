@@ -1,8 +1,8 @@
 """Repository-root CLI package for quant_symbols.
 
-The runtime package lives under ``src/quant_symbols``.  Keeping this path bridge
-lets ``python -m quant_symbols.cli`` work from a checkout after an editable
-install and during local smoke checks.
+The runtime package lives under ``src/quant_symbols``. Keeping this path bridge
+lets ``python3 -m quant_symbols.cli`` work from a repository checkout during
+local smoke checks.
 """
 
 from pathlib import Path

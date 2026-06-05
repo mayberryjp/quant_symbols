@@ -147,8 +147,11 @@ delegated implementation assignments by default. The expected workflow is:
 - delegated labels are reserved for actual implementation assignments
 
 For Day 5 cleanup, issues `#12`, `#13`, and `#14` are superseded by `#11` and
-are already closed. The delegated labels were removed from `#11`, `#12`, `#13`,
-and `#14` on 2026-06-05.
+are already closed. Delegated labels should be removed from daily scope,
+engineering-manager, and cleanup issues when those issues are not actual
+implementation assignments. As of the cleanup pass on 2026-06-05, closed issues
+`#1`, `#2`, `#3`, `#10`, `#11`, `#12`, `#13`, `#14`, and `#17` have no delegated
+labels attached.
 
 ## Jar Verification Handoff
 

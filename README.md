@@ -94,10 +94,18 @@ Expected output shape:
 postgres=ok schema_version=0001_symbol_master_vendor_traceability tables=7 vendor_sources=1 exchanges=5
 ```
 
-## Current GitHub Issues
+## Project Issue History
 
-- Day 1 infrastructure/schema foundation: <https://github.com/mayberryjp/quant_symbols/issues/1>
-- Day 2 Massive/Polygon client foundation: <https://github.com/mayberryjp/quant_symbols/issues/2>
+Daily scope issues are opened by the quant architect. Engineering-manager specs
+and role instructions should be posted as comments on those daily issues, not as
+separate role issues unless Jar explicitly asks for that split.
+
+- Day 1 repo/Postgres foundation: <https://github.com/mayberryjp/quant_symbols/issues/1>
+- Day 2 database schema v1: <https://github.com/mayberryjp/quant_symbols/issues/2>
+- Day 3 Massive/Polygon client foundation: <https://github.com/mayberryjp/quant_symbols/issues/3>
+- Day 4 symbol normalization pipeline: <https://github.com/mayberryjp/quant_symbols/issues/10>
+- Day 5 symbol quality and reporting: <https://github.com/mayberryjp/quant_symbols/issues/11>
+- CLI/docs cleanup: <https://github.com/mayberryjp/quant_symbols/issues/17>
 
 ## Massive/Polygon Vendor Client
 
