@@ -30,6 +30,23 @@ class SymbolMasterRepository:
             raise RuntimeError(f"vendor source not found: {code}")
         return int(row["id"])
 
+    def ensure_vendor_source(self, *, code: str, name: str, base_url: str | None = None) -> int:
+        row = self.connection.execute(
+            _text(
+                """
+                INSERT INTO symbol_master.vendor_sources (code, name, base_url)
+                VALUES (:code, :name, :base_url)
+                ON CONFLICT (code) DO UPDATE
+                SET name = EXCLUDED.name,
+                    base_url = EXCLUDED.base_url,
+                    updated_at = now()
+                RETURNING id
+                """
+            ),
+            {"code": code, "name": name, "base_url": base_url},
+        ).mappings().one()
+        return int(row["id"])
+
     def start_run(self, *, vendor_source_id: int, endpoint: str, request_params: dict[str, Any]) -> int:
         row = self.connection.execute(
             _text(
