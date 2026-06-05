@@ -5,9 +5,20 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from typing import Callable
 
 from quant_symbols.vendors.massive.client import MassiveClient
 from quant_symbols.vendors.massive.errors import MassiveError
+
+
+ClientFactory = Callable[[], MassiveClient]
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -17,18 +28,30 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow a real Massive/Polygon API request; disabled by default",
     )
+    parser.add_argument(
+        "--ticker",
+        default="AAPL",
+        help="ticker to request in live mode; default: AAPL",
+    )
+    parser.add_argument(
+        "--limit",
+        type=_positive_int,
+        default=1,
+        help="maximum ticker records to request in live mode; default: 1",
+    )
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, client_factory: ClientFactory | None = None) -> int:
     args = build_parser().parse_args(argv)
     if not args.live:
         print("live check disabled; pass --live with MASSIVE_API_KEY set")
         return 0
 
     try:
-        client = MassiveClient.from_env()
-        page = next(client.iter_ticker_pages(ticker="AAPL", limit=1, max_pages=1))
+        factory = client_factory or MassiveClient.from_env
+        client = factory()
+        page = next(client.iter_ticker_pages(ticker=args.ticker, limit=args.limit, max_pages=1))
     except StopIteration:
         print("no ticker results returned")
         return 1

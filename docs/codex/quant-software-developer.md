@@ -69,7 +69,7 @@ Manual live check is disabled unless explicitly enabled:
 
 ```bash
 python3 -m quant_symbols.vendors.massive.cli
-MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live
+MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live --ticker AAPL --limit 1
 ```
 
 Normal tests use mocked HTTP responses and do not require a live Massive/Polygon
@@ -126,6 +126,52 @@ This verification does not require Docker/Postgres or `MASSIVE_API_KEY`, does
 not contact the live Massive/Polygon API, and does not prove raw database writes
 or normalized symbol behavior for #29.
 
+## Issue 29 Slice 3 Verification
+
+The #29 explicit live API smoke slice is implemented in
+`src/quant_symbols/vendors/massive/cli.py`. The command remains disabled by
+default and only constructs a Massive client when `--live` is passed. Live mode
+loads configuration with `MassiveClient.from_env()`, which requires
+`MASSIVE_API_KEY`, and requests a single ticker-reference page with
+`max_pages=1`.
+
+The live smoke command supports a tiny request shape:
+
+```bash
+MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live --ticker AAPL --limit 1
+```
+
+`--ticker` defaults to `AAPL`, and `--limit` defaults to `1`. `--limit` must be
+greater than zero. The command prints a compact JSON summary containing provider
+status, count, request id, and returned tickers. It does not print
+`MASSIVE_API_KEY`.
+
+Focused CLI tests live in `tests/test_massive_cli.py`. They verify that default
+mode does not construct a client, live mode without a key fails clearly, live
+mode can run through an injected fake client, ticker/limit arguments are passed
+to the client request path, and output remains short and secret-safe.
+
+Verified commands for this slice:
+
+```bash
+python3 -m pytest tests/test_massive_cli.py tests/test_massive_client.py -q
+python3 -m quant_symbols.vendors.massive.cli
+env -u MASSIVE_API_KEY python3 -m quant_symbols.vendors.massive.cli --live
+```
+
+Observed output:
+
+```text
+........................                                                 [100%]
+24 passed in 0.11s
+live check disabled; pass --live with MASSIVE_API_KEY set
+massive client error: MASSIVE_API_KEY is required for live Massive/Polygon access
+```
+
+The missing-key live command exits with status 2 and writes its error to stderr.
+This verification does not require Docker/Postgres or a real `MASSIVE_API_KEY`.
+The optional live command above was not run in this checkout.
+
 ## CLI Entry Points
 
 The project has two separate CLI surfaces:
@@ -142,8 +188,8 @@ repository root.
 
 Do not document `python3 -m quant_symbols.cli vendors massive ...` as a supported
 Massive smoke command. That command family is not implemented. The Massive
-client smoke CLI also does not implement `--ticker`, `--limit`, `--fixture`,
-`--dry-run`, `--market`, or `--active`.
+client smoke CLI also does not implement `--fixture`, `--dry-run`, `--market`,
+or `--active`.
 
 Do not use `python3 -m quant_symbols.cli symbols sync ...` as proof that the
 Massive client smoke CLI works. That command belongs to the symbol-master sync
