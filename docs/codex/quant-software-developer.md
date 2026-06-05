@@ -101,6 +101,31 @@ This verification does not require Docker/Postgres or `MASSIVE_API_KEY`, and it
 does not prove typed parsing, live provider access, pagination, retry handling,
 raw database writes, or normalized symbol behavior for #29.
 
+## Issue 29 Slice 2 Verification
+
+The #29 typed response parsing slice is implemented by
+`src/quant_symbols/vendors/massive/models.py`. `TickerReferencePage.from_payload`
+validates that a Massive `/v3/reference/tickers` page is an object with a
+`results` list, then parses each result into a `TickerReference`. The typed
+record exposes the currently supported Massive fields and preserves the original
+provider result dictionary on `TickerReference.raw`, including unknown extra
+fields.
+
+Focused parser tests live in `tests/test_massive_models.py`. They verify one
+valid ticker response, multiple ticker results, unknown extra-field preservation,
+missing optional fields, and clear failure through `MassiveMalformedPayloadError`
+when the top-level response shape or ticker result shape is invalid.
+
+Verified command for this slice:
+
+```bash
+python3 -m pytest tests/test_massive_models.py tests/test_massive_client.py -q
+```
+
+This verification does not require Docker/Postgres or `MASSIVE_API_KEY`, does
+not contact the live Massive/Polygon API, and does not prove raw database writes
+or normalized symbol behavior for #29.
+
 ## CLI Entry Points
 
 The project has two separate CLI surfaces:
