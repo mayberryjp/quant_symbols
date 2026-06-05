@@ -49,8 +49,8 @@ for payload in client.iter_ticker_payloads(market="stocks", locale="us", active=
 Manual live check is disabled unless explicitly enabled:
 
 ```bash
-quant-symbols-massive
-MASSIVE_API_KEY=... quant-symbols-massive --live --ticker AAPL --limit 1
+python3 -m quant_symbols.vendors.massive.cli
+MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live --ticker AAPL --limit 1
 ```
 
 Normal tests use mocked HTTP responses and do not require a live Massive/Polygon
@@ -60,8 +60,10 @@ API key.
 
 The project has two separate CLI surfaces:
 
-- Database/Alembic and symbol normalization commands use `python3 -m quant_symbols.cli`.
-- The retrieval-only Massive/Polygon smoke check uses the `quant-symbols-massive` console script.
+- Database/Alembic commands use `python3 -m quant_symbols.cli db ...`.
+- Symbol-master sync commands, when the Day 4 sync code is the work being
+  reviewed, use `python3 -m quant_symbols.cli symbols ...`.
+- The Massive/Polygon client smoke check uses `python3 -m quant_symbols.vendors.massive.cli`.
 
 `python3 -m quant_symbols.cli db ...` remains supported after installation
 because the CLI wrapper is present under `src/quant_symbols/cli.py`. The
@@ -71,7 +73,11 @@ repository root.
 Do not document `python3 -m quant_symbols.cli vendors massive ...` as a supported
 Massive smoke command. That command family is not implemented. The Massive
 client smoke CLI also does not implement `--fixture`, `--dry-run`, `--market`,
-or `--active`; fixture dry-run behavior belongs to `symbols sync`.
+or `--active`.
+
+Do not use `python3 -m quant_symbols.cli symbols sync ...` as proof that the
+Massive client smoke CLI works. That command belongs to the symbol-master sync
+work, not the retrieval-only Massive client check.
 
 ## Day 4 Symbol Normalization Sync
 
@@ -156,21 +162,19 @@ labels attached.
 ## Jar Verification Handoff
 
 Run these from the host after installing the package in the active Python 3.12
-environment:
+environment when reviewing the Massive client / documentation cleanup:
 
 ```bash
 python3 -m pytest -q
 python3 -m quant_symbols.cli db --help
-python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive --dry-run
-quant-symbols-massive
+python3 -m quant_symbols.vendors.massive.cli
 ```
 
 Expected signs of success:
 
 - pytest exits zero
 - `db --help` lists `upgrade`, `verify`, and `downgrade-base`
-- fixture dry-run prints a `symbols_sync=ok` summary and does not require a database or `MASSIVE_API_KEY`
-- `quant-symbols-massive` prints `live check disabled; pass --live with MASSIVE_API_KEY set`
+- `python3 -m quant_symbols.vendors.massive.cli` prints `live check disabled; pass --live with MASSIVE_API_KEY set`
 
 Database verification requires a running local Postgres service with the Day 2
 schema:
@@ -185,11 +189,21 @@ python3 -m quant_symbols.cli db verify
 Stop the service without deleting data with `docker compose stop postgres`, or
 delete the local Postgres volume with `docker compose down -v`.
 
+Only use the symbol-master sync command when the PR is specifically about the
+Day 4 sync path:
+
+```bash
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive --dry-run
+```
+
+Expected output starts with `symbols_sync=ok`. This command is not a Massive
+client smoke test.
+
 Optional live Massive validation requires a real key and should be run only when
 provider access is intended:
 
 ```bash
-MASSIVE_API_KEY=... quant-symbols-massive --live --ticker AAPL --limit 1
+MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live --ticker AAPL --limit 1
 ```
 
 Expected output is JSON containing `status`, `count`, `request_id`, and

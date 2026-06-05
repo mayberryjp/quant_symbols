@@ -298,8 +298,8 @@ Do not require live fixture capture in normal test runs. If live capture tooling
 Implemented command source of truth:
 
 ```bash
-quant-symbols-massive
-MASSIVE_API_KEY=... quant-symbols-massive --live --ticker AAPL --limit 1
+python3 -m quant_symbols.vendors.massive.cli
+MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live --ticker AAPL --limit 1
 ```
 
 The first command is intentionally disabled and exits without a network request:
@@ -315,12 +315,11 @@ provider status, count, request id, and ticker list. It does not write to
 Postgres.
 
 The Massive client smoke CLI does not expose `vendors massive tickers`,
-`--fixture`, `--dry-run`, `--market`, or `--active`. Fixture dry-run belongs to
-the Day 4 symbol normalization command:
+`--fixture`, `--dry-run`, `--market`, or `--active`.
 
-```bash
-python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive --dry-run
-```
+Do not use the Day 4 symbol-master sync command as the smoke test for this Day 3
+Massive client. The Massive client smoke test is
+`python3 -m quant_symbols.vendors.massive.cli`.
 
 The database/Alembic CLI remains a separate command family:
 
@@ -361,8 +360,7 @@ Use mocked HTTP transports. No default test may call the live Massive/Polygon AP
 - Fixtures cover active stock, inactive stock, ETF, ADR, renamed-symbol style, and mocked pagination cases.
 - Unit tests cover pagination, retryable failure, auth/config loading, fixture parsing, DTO validation, and disabled smoke CLI behavior.
 - Local Massive smoke command runs without a live API key and reports that live
-  checks are disabled. Day 4 fixture dry-run uses `python3 -m quant_symbols.cli
-  symbols sync --fixture tests/fixtures/massive --dry-run`.
+  checks are disabled.
 
 ## Out Of Scope
 
