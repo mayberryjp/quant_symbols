@@ -172,6 +172,64 @@ The missing-key live command exits with status 2 and writes its error to stderr.
 This verification does not require Docker/Postgres or a real `MASSIVE_API_KEY`.
 The optional live command above was not run in this checkout.
 
+## Issue 29 Slice 4 Verification
+
+The #29 raw payload database-write slice is implemented by
+`src/quant_symbols/symbol_master/massive_raw_storage.py`.
+`MassiveRawPayloadStorageJob.store_pages` accepts parsed Massive
+`TickerReferencePage` objects, creates or reuses the `massive` vendor source,
+creates one `symbol_master.vendor_api_runs` row, inserts each ticker result raw
+dictionary into `symbol_master.raw_vendor_payloads`, links each payload row to
+the run, and finishes the run as `succeeded` or `failed`.
+
+The raw storage job is intentionally raw-only. It does not call the Massive live
+network, does not paginate, and does not upsert normalized `symbols`,
+`symbol_vendor_ids`, `symbol_aliases`, or `exchanges`. Existing broader symbol
+sync code still owns normalized symbol behavior and is not the proof point for
+this slice.
+
+Request parameters are sanitized before storage, and failure messages are
+redacted for secret-like values such as API keys and tokens. The schema already
+supports the required run and raw payload fields, so this slice did not add a
+migration.
+
+Focused raw-storage tests live in `tests/test_massive_raw_storage.py`. They
+verify one run is created, expected raw payload rows are inserted, raw provider
+dictionaries are preserved unchanged, rows link back to the run, request params
+and failed-run errors do not leak API-key values, and repeated runs are
+append-only by design.
+
+Verified commands for this slice:
+
+```bash
+python3 -m pytest tests/test_massive_raw_storage.py -q
+python3 -m pytest -q
+```
+
+Observed output:
+
+```text
+...                                                                      [100%]
+3 passed in 0.04s
+.................................................................        [100%]
+65 passed in 0.14s
+```
+
+This verification does not require Docker/Postgres or `MASSIVE_API_KEY`. The
+tests use a fake repository/engine boundary to prove the raw-storage
+orchestration without contacting the live Massive/Polygon API. Jar can run the
+same commands from a clean checkout; no cleanup is required. Optional database
+schema validation remains:
+
+```bash
+docker compose up -d postgres
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli db verify
+```
+
+Cleanup after optional Docker validation is `docker compose down` or
+`docker compose down -v` if the local Postgres volume should be deleted.
+
 ## CLI Entry Points
 
 The project has two separate CLI surfaces:
