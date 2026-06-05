@@ -559,3 +559,68 @@ python3 -m pytest -q
 
 Cleanup after optional Docker validation is `docker compose down`, or
 `docker compose down -v` if the local Postgres volume should be deleted.
+
+## Issue 35 Slice 3 Symbol And Vendor ID Upsert
+
+The #35 Slice 3 symbol/vendor-identity path is implemented by
+`SymbolMasterRepository.upsert_symbol_vendor_identity_candidate` in
+`src/quant_symbols/symbol_master/repository.py`. It accepts the Slice 1
+`MassiveTickerCandidate`, the existing vendor source id, run id, raw payload id,
+and an optional `primary_exchange_id` from the Slice 2 exchange upsert.
+
+This entrypoint writes only:
+
+- `symbol_master.symbols`
+- `symbol_master.symbol_vendor_ids`
+
+It does not call Massive/Polygon, parse new payload shapes, upsert exchanges,
+insert aliases, read raw payload batches, or run a full symbol sync.
+
+Matching behavior for this slice:
+
+- first match an existing symbol by `composite_figi` when present
+- then match through a Massive-scoped `symbol_vendor_ids.vendor_symbol`
+- finally fall back to `locale + market + canonical_ticker`
+
+The symbol row stores the normalized ticker fields from the Slice 1 candidate.
+`CS` candidates store `asset_class=equity` and `security_type=common_stock`.
+`ETF` candidates store `asset_class=fund` and `security_type=etf`. Slice 1
+unknown asset types are stored with schema-safe `asset_class=other` while
+preserving `security_type=unknown`.
+
+The vendor identity row stores the Massive source ticker in `vendor_symbol` and
+uses the candidate `composite_figi`, when present, as `vendor_asset_id`.
+Repeated calls update last-seen run and payload references without creating
+duplicate symbols or vendor identities.
+
+Focused tests live in `tests/test_symbol_master_symbol_vendor_upsert.py`. They
+use a fake connection abstraction because this worker validated the narrow SQL
+contract without Docker/Postgres. The fake fails if this Slice 3 entrypoint
+touches exchanges, aliases, raw payload rows, or vendor API runs.
+
+Verified commands:
+
+```bash
+python3 -m pytest tests/test_symbol_master_symbol_vendor_upsert.py -q
+python3 -m pytest -q
+```
+
+Observed output:
+
+```text
+6 passed
+89 passed
+```
+
+This slice does not require Docker/Postgres or `MASSIVE_API_KEY`. Optional
+Postgres verification for Jar from a dependency-installed checkout is:
+
+```bash
+docker compose up -d postgres
+python3 -m quant_symbols.cli db upgrade
+python3 -m pytest tests/test_symbol_master_symbol_vendor_upsert.py -q
+python3 -m pytest -q
+```
+
+Cleanup after optional Docker validation is `docker compose down`, or
+`docker compose down -v` if the local Postgres volume should be deleted.

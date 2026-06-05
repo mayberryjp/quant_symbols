@@ -8,7 +8,7 @@ import json
 from typing import Any
 
 from quant_symbols.symbol_master.massive_mapper import AliasCandidate, ExchangeCandidate, SymbolCandidate
-from quant_symbols.symbol_master.normalization import MassiveExchangeCandidate
+from quant_symbols.symbol_master.normalization import MassiveExchangeCandidate, MassiveTickerCandidate
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,12 @@ class RawPayloadLink:
 @dataclass(frozen=True)
 class ExchangeUpsertResult:
     exchange_id: int | None
+    counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class SymbolVendorIdentityUpsertResult:
+    symbol_id: int
     counts: dict[str, int]
 
 
@@ -174,6 +180,36 @@ class SymbolMasterRepository:
         exchange_id = self._upsert_exchange(exchange, counts)
         return ExchangeUpsertResult(exchange_id=exchange_id, counts=counts)
 
+    def upsert_symbol_vendor_identity_candidate(
+        self,
+        *,
+        vendor_source_id: int,
+        run_id: int,
+        raw_payload_id: int,
+        candidate: MassiveTickerCandidate,
+        primary_exchange_id: int | None = None,
+    ) -> SymbolVendorIdentityUpsertResult:
+        """Upsert one normalized symbol and its Massive vendor identity.
+
+        This Slice 3 entrypoint deliberately does not create exchanges or aliases.
+        Callers that need an exchange link should run the Slice 2 exchange upsert
+        first and pass the returned exchange id here.
+        """
+
+        values = _massive_symbol_values(candidate, run_id, raw_payload_id, primary_exchange_id)
+        counts: dict[str, int] = {}
+        row = self._find_massive_symbol(vendor_source_id, candidate)
+        symbol_id = self._upsert_massive_symbol_row(row, values, counts)
+        self._upsert_massive_vendor_id(
+            vendor_source_id=vendor_source_id,
+            run_id=run_id,
+            raw_payload_id=raw_payload_id,
+            symbol_id=symbol_id,
+            candidate=candidate,
+            counts=counts,
+        )
+        return SymbolVendorIdentityUpsertResult(symbol_id=symbol_id, counts=counts)
+
     def _upsert_exchange(self, exchange: ExchangeCandidate | MassiveExchangeCandidate, counts: dict[str, int]) -> int:
         row = self.connection.execute(
             _text("SELECT id, name FROM symbol_master.exchanges WHERE mic = :mic"),
@@ -306,6 +342,199 @@ class SymbolMasterRepository:
         ).mappings().first()
         return dict(row) if row is not None else None
 
+    def _find_massive_symbol(self, vendor_source_id: int, candidate: MassiveTickerCandidate) -> dict[str, Any] | None:
+        if candidate.composite_figi:
+            row = self.connection.execute(
+                _text("SELECT * FROM symbol_master.symbols WHERE composite_figi = :figi"),
+                {"figi": candidate.composite_figi},
+            ).mappings().first()
+            if row is not None:
+                return dict(row)
+        if candidate.source_ticker:
+            row = self.connection.execute(
+                _text(
+                    """
+                    SELECT s.*
+                    FROM symbol_master.symbol_vendor_ids v
+                    JOIN symbol_master.symbols s ON s.id = v.symbol_id
+                    WHERE v.vendor_source_id = :vendor_source_id
+                      AND lower(v.vendor_symbol) = lower(:vendor_symbol)
+                    ORDER BY v.active DESC, s.active DESC, s.id ASC
+                    LIMIT 1
+                    """
+                ),
+                {"vendor_source_id": vendor_source_id, "vendor_symbol": candidate.source_ticker},
+            ).mappings().first()
+            if row is not None:
+                return dict(row)
+        row = self.connection.execute(
+            _text(
+                """
+                SELECT * FROM symbol_master.symbols
+                WHERE lower(locale) = lower(:locale)
+                  AND lower(market) = lower(:market)
+                  AND lower(canonical_ticker) = lower(:ticker)
+                ORDER BY active DESC, id ASC
+                LIMIT 1
+                """
+            ),
+            {
+                "locale": _required_text(candidate.locale, "locale"),
+                "market": _required_text(candidate.market, "market"),
+                "ticker": _required_text(candidate.canonical_ticker, "canonical_ticker"),
+            },
+        ).mappings().first()
+        return dict(row) if row is not None else None
+
+    def _upsert_massive_symbol_row(
+        self,
+        row: dict[str, Any] | None,
+        values: dict[str, Any],
+        counts: dict[str, int],
+    ) -> int:
+        if row is None:
+            inserted = self.connection.execute(
+                _text(
+                    """
+                    INSERT INTO symbol_master.symbols
+                        (canonical_ticker, name, market, locale, currency, primary_exchange_id,
+                         asset_class, security_type, active, cik, composite_figi, share_class_figi,
+                         first_seen_run_id, first_seen_payload_id, last_seen_run_id, last_seen_payload_id,
+                         delisted_at)
+                    VALUES
+                        (:canonical_ticker, :name, :market, :locale, :currency, :primary_exchange_id,
+                         :asset_class, :security_type, :active, :cik, :composite_figi, :share_class_figi,
+                         :run_id, :payload_id, :run_id, :payload_id, :delisted_at)
+                    RETURNING id
+                    """
+                ),
+                values,
+            ).mappings().one()
+            _increment(counts, "symbols_inserted")
+            return int(inserted["id"])
+
+        changed = _massive_symbol_domain_changed(row, values)
+        self.connection.execute(
+            _text(
+                """
+                UPDATE symbol_master.symbols
+                SET canonical_ticker = :canonical_ticker,
+                    name = :name,
+                    market = :market,
+                    locale = :locale,
+                    currency = :currency,
+                    primary_exchange_id = :primary_exchange_id,
+                    asset_class = :asset_class,
+                    security_type = :security_type,
+                    active = :active,
+                    cik = :cik,
+                    composite_figi = :composite_figi,
+                    share_class_figi = :share_class_figi,
+                    last_seen_run_id = :run_id,
+                    last_seen_payload_id = :payload_id,
+                    delisted_at = :delisted_at,
+                    updated_at = now()
+                WHERE id = :id
+                """
+            ),
+            {**values, "id": row["id"]},
+        )
+        _increment(counts, "symbols_updated" if changed else "symbols_unchanged")
+        return int(row["id"])
+
+    def _upsert_massive_vendor_id(
+        self,
+        *,
+        vendor_source_id: int,
+        run_id: int,
+        raw_payload_id: int,
+        symbol_id: int,
+        candidate: MassiveTickerCandidate,
+        counts: dict[str, int],
+    ) -> None:
+        row = None
+        if candidate.composite_figi:
+            row = self.connection.execute(
+                _text(
+                    """
+                    SELECT id, symbol_id, vendor_symbol, vendor_asset_id, active
+                    FROM symbol_master.symbol_vendor_ids
+                    WHERE vendor_source_id = :vendor_source_id
+                      AND vendor_asset_id = :vendor_asset_id
+                    ORDER BY active DESC, id ASC
+                    LIMIT 1
+                    """
+                ),
+                {"vendor_source_id": vendor_source_id, "vendor_asset_id": candidate.composite_figi},
+            ).mappings().first()
+        if row is None:
+            row = self.connection.execute(
+                _text(
+                    """
+                    SELECT id, symbol_id, vendor_symbol, vendor_asset_id, active
+                    FROM symbol_master.symbol_vendor_ids
+                    WHERE vendor_source_id = :vendor_source_id
+                      AND lower(vendor_symbol) = lower(:vendor_symbol)
+                    ORDER BY active DESC, id ASC
+                    LIMIT 1
+                    """
+                ),
+                {
+                    "vendor_source_id": vendor_source_id,
+                    "vendor_symbol": _required_text(candidate.source_ticker, "source_ticker"),
+                },
+            ).mappings().first()
+
+        values = {
+            "symbol_id": symbol_id,
+            "vendor_source_id": vendor_source_id,
+            "vendor_symbol": _required_text(candidate.source_ticker, "source_ticker"),
+            "vendor_asset_id": candidate.composite_figi,
+            "run_id": run_id,
+            "payload_id": raw_payload_id,
+            "active": candidate.active if candidate.active is not None else True,
+        }
+        if row is None:
+            self.connection.execute(
+                _text(
+                    """
+                    INSERT INTO symbol_master.symbol_vendor_ids
+                        (symbol_id, vendor_source_id, vendor_symbol, vendor_asset_id,
+                         first_seen_run_id, first_seen_payload_id, last_seen_run_id, last_seen_payload_id, active)
+                    VALUES
+                        (:symbol_id, :vendor_source_id, :vendor_symbol, :vendor_asset_id,
+                         :run_id, :payload_id, :run_id, :payload_id, :active)
+                    """
+                ),
+                values,
+            )
+            _increment(counts, "vendor_ids_inserted")
+            return
+
+        changed = (
+            row["symbol_id"] != symbol_id
+            or row["vendor_symbol"] != values["vendor_symbol"]
+            or row["vendor_asset_id"] != values["vendor_asset_id"]
+            or row["active"] != values["active"]
+        )
+        self.connection.execute(
+            _text(
+                """
+                UPDATE symbol_master.symbol_vendor_ids
+                SET symbol_id = :symbol_id,
+                    vendor_symbol = :vendor_symbol,
+                    vendor_asset_id = :vendor_asset_id,
+                    last_seen_run_id = :run_id,
+                    last_seen_payload_id = :payload_id,
+                    active = :active,
+                    updated_at = now()
+                WHERE id = :id
+                """
+            ),
+            {**values, "id": row["id"]},
+        )
+        _increment(counts, "vendor_ids_updated" if changed else "vendor_ids_unchanged")
+
     def _upsert_vendor_id(
         self,
         vendor_source_id: int,
@@ -435,6 +664,71 @@ def _symbol_domain_changed(row: dict[str, Any], values: dict[str, Any]) -> bool:
         if _normalize_compare(row.get(key)) != _normalize_compare(values.get(key)):
             return True
     return False
+
+
+def _massive_symbol_values(
+    candidate: MassiveTickerCandidate,
+    run_id: int,
+    raw_payload_id: int,
+    primary_exchange_id: int | None,
+) -> dict[str, Any]:
+    return {
+        "canonical_ticker": _required_text(candidate.canonical_ticker, "canonical_ticker"),
+        "name": candidate.name,
+        "market": _required_text(candidate.market, "market"),
+        "locale": _required_text(candidate.locale, "locale"),
+        "currency": _currency_code(candidate.currency_name),
+        "primary_exchange_id": primary_exchange_id,
+        "asset_class": _asset_class_for_schema(candidate.asset_type),
+        "security_type": candidate.security_type or "unknown",
+        "active": candidate.active if candidate.active is not None else True,
+        "cik": candidate.cik,
+        "composite_figi": candidate.composite_figi,
+        "share_class_figi": candidate.share_class_figi,
+        "run_id": run_id,
+        "payload_id": raw_payload_id,
+        "delisted_at": candidate.delisted_utc,
+    }
+
+
+def _massive_symbol_domain_changed(row: dict[str, Any], values: dict[str, Any]) -> bool:
+    keys = (
+        "canonical_ticker",
+        "name",
+        "market",
+        "locale",
+        "currency",
+        "primary_exchange_id",
+        "asset_class",
+        "security_type",
+        "active",
+        "cik",
+        "composite_figi",
+        "share_class_figi",
+        "delisted_at",
+    )
+    for key in keys:
+        if _normalize_compare(row.get(key)) != _normalize_compare(values.get(key)):
+            return True
+    return False
+
+
+def _asset_class_for_schema(asset_type: str) -> str:
+    if asset_type in {"equity", "fund", "crypto", "forex", "index"}:
+        return asset_type
+    return "other"
+
+
+def _currency_code(value: str | None) -> str:
+    if isinstance(value, str) and len(value.strip()) == 3:
+        return value.strip().upper()
+    return "USD"
+
+
+def _required_text(value: str | None, field_name: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return value
+    raise ValueError(f"Massive ticker candidate is missing required field: {field_name}")
 
 
 def _normalize_compare(value: Any) -> Any:
