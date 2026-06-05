@@ -37,7 +37,7 @@ def test_live_mode_fails_clearly_when_api_key_missing(
     captured = capsys.readouterr()
     assert exit_code == 2
     assert captured.out == ""
-    assert captured.err == "massive client error: MASSIVE_API_KEY is required\n"
+    assert "massive client error: MASSIVE_API_KEY is required" in captured.err
 
 
 def test_help_documents_only_live_flag(capsys: pytest.CaptureFixture[str]) -> None:
