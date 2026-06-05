@@ -41,7 +41,7 @@ class MassiveClient:
 
     @classmethod
     def from_env(cls, *, transport: Transport | None = None, sleep: SleepFunc | None = None) -> "MassiveClient":
-        return cls(MassiveConfig.from_env(), transport=transport, sleep=sleep)
+        return cls(MassiveConfig.from_env(require_api_key=True), transport=transport, sleep=sleep)
 
     def iter_ticker_pages(
         self,

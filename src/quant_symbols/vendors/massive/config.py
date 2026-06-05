@@ -15,9 +15,16 @@ DEFAULT_BACKOFF_SECONDS = 0.5
 DEFAULT_BACKOFF_MULTIPLIER = 2.0
 
 
-def _float_from_env(name: str, default: float) -> float:
+def _env_value(name: str) -> str | None:
     value = os.environ.get(name)
     if value in (None, ""):
+        return None
+    return value
+
+
+def _float_from_env(name: str, default: float) -> float:
+    value = _env_value(name)
+    if value is None:
         return default
     try:
         parsed = float(value)
@@ -29,8 +36,8 @@ def _float_from_env(name: str, default: float) -> float:
 
 
 def _int_from_env(name: str, default: int) -> int:
-    value = os.environ.get(name)
-    if value in (None, ""):
+    value = _env_value(name)
+    if value is None:
         return default
     try:
         parsed = int(value)
@@ -49,7 +56,7 @@ class MassiveConfig:
     not expose credentials.
     """
 
-    api_key: str
+    api_key: str = ""
     base_url: str = DEFAULT_BASE_URL
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     retry_count: int = DEFAULT_RETRY_COUNT
@@ -57,8 +64,6 @@ class MassiveConfig:
     backoff_multiplier: float = DEFAULT_BACKOFF_MULTIPLIER
 
     def __post_init__(self) -> None:
-        if not self.api_key:
-            raise MassiveConfigError("MASSIVE_API_KEY is required")
         if not self.base_url:
             raise MassiveConfigError("MASSIVE_BASE_URL is required")
         if self.timeout_seconds <= 0:
@@ -82,12 +87,21 @@ class MassiveConfig:
         )
 
     @classmethod
-    def from_env(cls) -> "MassiveConfig":
-        """Build config from environment variables."""
+    def from_env(cls, *, require_api_key: bool = False) -> "MassiveConfig":
+        """Build config from environment variables.
+
+        Set ``require_api_key=True`` only for intentional live provider access.
+        Non-live config loading keeps tests and disabled smoke commands free of
+        secret requirements.
+        """
+
+        api_key = _env_value("MASSIVE_API_KEY") or ""
+        if require_api_key and not api_key:
+            raise MassiveConfigError("MASSIVE_API_KEY is required for live Massive/Polygon access")
 
         return cls(
-            api_key=os.environ.get("MASSIVE_API_KEY", ""),
-            base_url=os.environ.get("MASSIVE_BASE_URL", DEFAULT_BASE_URL).rstrip("/"),
+            api_key=api_key,
+            base_url=(_env_value("MASSIVE_BASE_URL") or DEFAULT_BASE_URL).rstrip("/"),
             timeout_seconds=_float_from_env("MASSIVE_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS),
             retry_count=_int_from_env("MASSIVE_RETRY_COUNT", DEFAULT_RETRY_COUNT),
             backoff_seconds=_float_from_env("MASSIVE_BACKOFF_SECONDS", DEFAULT_BACKOFF_SECONDS),

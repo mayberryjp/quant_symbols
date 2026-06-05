@@ -20,7 +20,7 @@ records and raw payload rows.
 
 ## Configuration
 
-Required:
+Required only for intentional live Massive/Polygon access:
 
 - `MASSIVE_API_KEY`
 
@@ -33,6 +33,11 @@ Optional:
 - `MASSIVE_BACKOFF_MULTIPLIER`, default `2`
 
 Do not commit real API keys. `.env.example` contains placeholders only.
+`MassiveConfig.from_env()` can load non-live settings without an API key.
+`MassiveConfig.from_env(require_api_key=True)` is the live-access path and raises
+a `MassiveConfigError` when `MASSIVE_API_KEY` is missing. `MassiveConfig` repr
+output redacts the API key, and config validation errors report variable names
+without including secret values.
 
 ## Usage
 
@@ -44,6 +49,14 @@ from quant_symbols.vendors.massive import MassiveClient
 client = MassiveClient.from_env()
 for payload in client.iter_ticker_payloads(market="stocks", locale="us", active=True, limit=1000):
     print(payload.provider_id, payload.payload)
+```
+
+Load config without requiring a secret for non-live checks:
+
+```python
+from quant_symbols.vendors.massive import MassiveConfig
+
+config = MassiveConfig.from_env()
 ```
 
 Manual live check is disabled unless explicitly enabled:
