@@ -502,3 +502,60 @@ Observed output:
 7 passed
 8 passed
 ```
+
+## Issue 35 Slice 2 Exchange Candidate And Upsert
+
+The #35 Slice 2 exchange-only path is implemented by
+`map_massive_exchange_candidate` in
+`src/quant_symbols/symbol_master/normalization.py` and
+`SymbolMasterRepository.upsert_exchange_candidate` in
+`src/quant_symbols/symbol_master/repository.py`.
+
+`map_massive_exchange_candidate` accepts the Slice 1 `MassiveTickerCandidate`
+and returns a `MassiveExchangeCandidate` for the candidate's primary exchange,
+or `None` when the provider exchange code is missing or blank. Exchange codes
+are uppercased into the schema's `mic` field. Known Massive/Polygon primary
+exchange codes are mapped to stable names for `XNYS`, `XNAS`, `ARCX`, `BATS`,
+and `OTCM`. Unknown nonblank codes are preserved predictably as provisional
+exchange candidates named `Unmapped exchange <MIC>`.
+
+`SymbolMasterRepository.upsert_exchange_candidate` writes only
+`symbol_master.exchanges`. It selects by `mic`, inserts when missing, updates
+the name for known non-provisional candidates when the stored name differs, and
+returns inserted, updated, unchanged, or skipped counts. It does not insert or
+update `symbols`, `symbol_vendor_ids`, `symbol_aliases`, raw payload rows, or
+vendor run rows.
+
+Focused tests live in `tests/test_symbol_master_exchange_upsert.py`. They use a
+fake connection abstraction because this worker did not have SQLAlchemy or
+Docker/Postgres available, and they fail if the exchange-only method touches
+non-exchange symbol-master tables.
+
+Verified commands:
+
+```bash
+python3 -m pytest tests/test_symbol_master_exchange_upsert.py tests/test_symbol_master_normalization.py -q
+python3 -m pytest -q
+```
+
+Observed output:
+
+```text
+13 passed
+83 passed
+```
+
+This slice does not require `MASSIVE_API_KEY`, does not call Massive/Polygon,
+does not add migrations, and does not implement symbol rows, vendor IDs,
+aliases, or normalize-raw commands. Optional Postgres verification for Jar from
+a dependency-installed checkout is:
+
+```bash
+docker compose up -d postgres
+python3 -m quant_symbols.cli db upgrade
+python3 -m pytest tests/test_symbol_master_exchange_upsert.py -q
+python3 -m pytest -q
+```
+
+Cleanup after optional Docker validation is `docker compose down`, or
+`docker compose down -v` if the local Postgres volume should be deleted.
