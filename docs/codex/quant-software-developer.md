@@ -75,6 +75,32 @@ MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live
 Normal tests use mocked HTTP responses and do not require a live Massive/Polygon
 API key.
 
+## Issue 29 Slice 1 Verification
+
+The current #29 software slice verified in this checkout is the mocked
+single-request Massive client path. `MassiveClient.get_ticker_reference_page`
+builds one `/v3/reference/tickers` request through an injected transport and
+returns the decoded provider JSON. The focused tests verify path/query
+construction, API-key query handling, secret-safe config repr output, and the
+disabled-by-default smoke command.
+
+Verified commands:
+
+```bash
+python3 -m pytest tests/test_massive_client.py tests/test_massive_cli.py -q
+python3 -m quant_symbols.vendors.massive.cli
+```
+
+Expected disabled smoke output:
+
+```text
+live check disabled; pass --live with MASSIVE_API_KEY set
+```
+
+This verification does not require Docker/Postgres or `MASSIVE_API_KEY`, and it
+does not prove typed parsing, live provider access, pagination, retry handling,
+raw database writes, or normalized symbol behavior for #29.
+
 ## CLI Entry Points
 
 The project has two separate CLI surfaces:
