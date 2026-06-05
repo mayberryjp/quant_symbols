@@ -150,8 +150,17 @@ Database-backed fixture smoke flow:
 python3 -m quant_symbols.cli db upgrade
 python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive
 python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive
+python3 -m quant_symbols.cli symbols quality --latest
 python3 -m quant_symbols.cli symbols sync-summary --latest
 ```
 
 Live sync uses `MASSIVE_API_KEY` through `MassiveClient.from_env()` and supports
 `--max-pages`, `--active true|false|all`, `--market`, `--locale`, and `--limit`.
+
+The Day 5 quality layer records deterministic warning/error findings and writes
+normalized sync health to `symbol_master.vendor_api_runs.sync_summary`. The
+read-only backend endpoint for the latest symbol sync health is:
+
+```text
+GET /jobs/symbol-sync/latest
+```

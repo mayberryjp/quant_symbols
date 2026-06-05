@@ -7,6 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from quant_symbols.symbol_master.data_quality import (
+    ActiveState,
+    SymbolQualityChecker,
+    active_state_from_candidate,
+    calculate_active_inactive_diffs,
+)
 from quant_symbols.symbol_master.fixtures import load_massive_fixture_pages
 from quant_symbols.symbol_master.massive_mapper import map_ticker_reference
 from quant_symbols.symbol_master.repository import SymbolMasterRepository
@@ -53,6 +59,11 @@ class MassiveSymbolSyncJob:
                 request_params=_request_params(options),
             )
             summary.run_id = run_id
+            previous_active_states = repository.latest_successful_active_states(
+                vendor_source_id=vendor_source_id,
+                endpoint=self.endpoint,
+                before_run_id=run_id,
+            )
             try:
                 pages = self._pages(options)
                 self._process_pages(
@@ -61,6 +72,7 @@ class MassiveSymbolSyncJob:
                     repository=repository,
                     run_id=run_id,
                     vendor_source_id=vendor_source_id,
+                    previous_active_states=previous_active_states,
                 )
             except Exception as exc:
                 summary.status = "failed"
@@ -73,6 +85,8 @@ class MassiveSymbolSyncJob:
                     records_inserted=summary.raw_payloads,
                     records_failed=summary.errors,
                     error_message=summary.error_message,
+                    sync_summary=summary.health_payload(),
+                    quality_findings=summary.quality_findings_payload(),
                 )
                 return summary
             repository.finish_run(
@@ -81,6 +95,8 @@ class MassiveSymbolSyncJob:
                 records_seen=summary.records_seen,
                 records_inserted=summary.raw_payloads,
                 records_failed=summary.errors,
+                sync_summary=summary.health_payload(),
+                quality_findings=summary.quality_findings_payload(),
             )
         return summary
 
@@ -89,6 +105,12 @@ class MassiveSymbolSyncJob:
             raise RuntimeError("DATABASE_URL/SQLAlchemy engine is required for sync-summary")
         with self.engine.connect() as connection:
             return SymbolMasterRepository(connection).latest_run_summary()
+
+    def latest_health(self) -> dict[str, Any] | None:
+        if self.engine is None:
+            raise RuntimeError("DATABASE_URL/SQLAlchemy engine is required for symbol sync health")
+        with self.engine.connect() as connection:
+            return SymbolMasterRepository(connection).latest_symbol_sync_health()
 
     def _pages(self, options: SyncOptions) -> Iterable[TickerReferencePage]:
         if options.fixture is not None:
@@ -113,7 +135,10 @@ class MassiveSymbolSyncJob:
         repository: SymbolMasterRepository | None,
         run_id: int | None,
         vendor_source_id: int | None,
+        previous_active_states: dict[tuple[str, str, str], ActiveState] | None = None,
     ) -> None:
+        quality_checker = SymbolQualityChecker()
+        current_active_states: dict[tuple[str, str, str], ActiveState] = {}
         dry_run_symbols: set[tuple[str, str, str]] = set()
         dry_run_exchanges: set[str] = set()
         dry_run_vendor_ids: set[str] = set()
@@ -123,13 +148,19 @@ class MassiveSymbolSyncJob:
             for reference in page.results:
                 summary.records_seen += 1
                 mapped = map_ticker_reference(reference)
-                for warning in mapped.warnings:
-                    summary.add_warning(f"{reference.ticker}: {warning}")
+                for finding in quality_checker.check(
+                    reference=reference,
+                    candidate=mapped.candidate,
+                    mapper_warnings=mapped.warnings,
+                ):
+                    summary.add_finding(finding)
                 if mapped.candidate is None:
                     summary.skipped += 1
                     if mapped.skipped_reason:
                         summary.add_warning(f"{reference.ticker}: skipped: {mapped.skipped_reason}")
                     continue
+                active_state = active_state_from_candidate(mapped.candidate)
+                current_active_states[active_state.key] = active_state
                 if repository is None:
                     symbol_key = (
                         mapped.candidate.locale.lower(),
@@ -171,6 +202,13 @@ class MassiveSymbolSyncJob:
                         candidate=mapped.candidate,
                     )
                 )
+        if previous_active_states:
+            summary.add_active_inactive_diffs(
+                calculate_active_inactive_diffs(
+                    previous=previous_active_states,
+                    current=current_active_states,
+                )
+            )
 
 
 def _request_params(options: SyncOptions) -> dict[str, Any]:

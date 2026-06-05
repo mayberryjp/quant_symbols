@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 from typing import Any
 
+from quant_symbols.symbol_master.data_quality import ActiveState
 from quant_symbols.symbol_master.massive_mapper import AliasCandidate, ExchangeCandidate, SymbolCandidate
 
 
@@ -57,6 +58,8 @@ class SymbolMasterRepository:
         records_inserted: int,
         records_failed: int,
         error_message: str | None = None,
+        sync_summary: dict[str, Any] | None = None,
+        quality_findings: list[dict[str, Any]] | None = None,
     ) -> None:
         self.connection.execute(
             _text(
@@ -67,7 +70,9 @@ class SymbolMasterRepository:
                     records_seen = :records_seen,
                     records_inserted = :records_inserted,
                     records_failed = :records_failed,
-                    error_message = :error_message
+                    error_message = :error_message,
+                    sync_summary = CAST(:sync_summary AS jsonb),
+                    quality_findings = CAST(:quality_findings AS jsonb)
                 WHERE id = :run_id
                 """
             ),
@@ -78,6 +83,8 @@ class SymbolMasterRepository:
                 "records_inserted": records_inserted,
                 "records_failed": records_failed,
                 "error_message": error_message,
+                "sync_summary": json.dumps(sync_summary or {}, sort_keys=True),
+                "quality_findings": json.dumps(quality_findings or [], sort_keys=True),
             },
         )
 
@@ -132,7 +139,8 @@ class SymbolMasterRepository:
             _text(
                 """
                 SELECT r.id, v.code AS vendor, r.endpoint, r.status, r.started_at, r.finished_at,
-                       r.records_seen, r.records_inserted, r.records_failed, r.error_message
+                       r.records_seen, r.records_inserted, r.records_failed, r.error_message,
+                       r.sync_summary, r.quality_findings
                 FROM symbol_master.vendor_api_runs r
                 JOIN symbol_master.vendor_sources v ON v.id = r.vendor_source_id
                 ORDER BY r.started_at DESC, r.id DESC
@@ -141,6 +149,104 @@ class SymbolMasterRepository:
             )
         ).mappings().first()
         return dict(row) if row is not None else None
+
+    def latest_symbol_sync_health(self) -> dict[str, Any] | None:
+        row = self.latest_run_summary()
+        if row is None:
+            return None
+        summary = _json_object(row.get("sync_summary"))
+        counts = _json_object(summary.get("counts"))
+        if not counts:
+            counts = {
+                "records_seen": int(row["records_seen"] or 0),
+                "raw_payloads": int(row["records_inserted"] or 0),
+                "inserted": int(row["records_inserted"] or 0),
+                "updated": 0,
+                "unchanged": 0,
+                "deactivated": 0,
+                "reactivated": 0,
+                "skipped": 0,
+                "warned": 0,
+                "errored": int(row["records_failed"] or 0),
+            }
+        return {
+            "run_id": int(row["id"]),
+            "vendor": row["vendor"],
+            "endpoint": row["endpoint"],
+            "status": row["status"],
+            "started_at": _isoformat(row["started_at"]),
+            "completed_at": _isoformat(row["finished_at"]),
+            "counts": counts,
+            "warnings": _json_object(summary.get("warnings")) or {"total": 0, "categories": {}},
+            "errors": _json_object(summary.get("errors")) or {
+                "total": int(row["records_failed"] or 0),
+                "categories": {},
+            },
+            "active_inactive_diffs": _json_object(summary.get("active_inactive_diffs"))
+            or {
+                "deactivated_count": 0,
+                "reactivated_count": 0,
+                "deactivated": [],
+                "reactivated": [],
+            },
+            "top_warning_categories": _json_list(summary.get("top_warning_categories")),
+            "error_message": row["error_message"],
+        }
+
+    def latest_successful_active_states(
+        self,
+        *,
+        vendor_source_id: int,
+        endpoint: str,
+        before_run_id: int,
+    ) -> dict[tuple[str, str, str], ActiveState]:
+        run = self.connection.execute(
+            _text(
+                """
+                SELECT id
+                FROM symbol_master.vendor_api_runs
+                WHERE vendor_source_id = :vendor_source_id
+                  AND endpoint = :endpoint
+                  AND status = 'succeeded'
+                  AND id < :before_run_id
+                ORDER BY started_at DESC, id DESC
+                LIMIT 1
+                """
+            ),
+            {
+                "vendor_source_id": vendor_source_id,
+                "endpoint": endpoint,
+                "before_run_id": before_run_id,
+            },
+        ).mappings().first()
+        if run is None:
+            return {}
+        rows = self.connection.execute(
+            _text(
+                """
+                SELECT payload
+                FROM symbol_master.raw_vendor_payloads
+                WHERE vendor_source_id = :vendor_source_id
+                  AND vendor_api_run_id = :run_id
+                ORDER BY id ASC
+                """
+            ),
+            {"vendor_source_id": vendor_source_id, "run_id": run["id"]},
+        ).mappings().all()
+        states: dict[tuple[str, str, str], ActiveState] = {}
+        for row in rows:
+            payload = _json_object(row["payload"])
+            ticker = payload.get("ticker")
+            if not isinstance(ticker, str) or not ticker.strip():
+                continue
+            state = ActiveState(
+                canonical_ticker=ticker.strip().upper(),
+                market=_payload_text(payload.get("market"), "stocks"),
+                locale=_payload_text(payload.get("locale"), "us"),
+                active=payload.get("active") if isinstance(payload.get("active"), bool) else True,
+            )
+            states[state.key] = state
+        return states
 
     def _upsert_exchange(self, exchange: ExchangeCandidate, counts: dict[str, int]) -> int:
         row = self.connection.execute(
@@ -421,3 +527,33 @@ def _text(sql: str) -> Any:
     except ModuleNotFoundError as exc:
         raise RuntimeError("SQLAlchemy is required for database-backed symbol sync") from exc
     return text(sql)
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        loaded = json.loads(value)
+        return loaded if isinstance(loaded, dict) else {}
+    return {}
+
+
+def _json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip():
+        loaded = json.loads(value)
+        return loaded if isinstance(loaded, list) else []
+    return []
+
+
+def _payload_text(value: Any, default: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip().lower()
+    return default
+
+
+def _isoformat(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return None

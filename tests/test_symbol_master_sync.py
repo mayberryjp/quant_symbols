@@ -15,6 +15,7 @@ def test_cli_exposes_symbol_sync_commands() -> None:
 
     assert parser.parse_args(["symbols", "sync", "--fixture", str(FIXTURES), "--dry-run"]).func.__name__ == "symbols_sync"
     assert parser.parse_args(["symbols", "sync-summary", "--latest"]).func.__name__ == "symbols_sync_summary"
+    assert parser.parse_args(["symbols", "quality", "--latest"]).func.__name__ == "symbols_quality"
 
 
 def test_fixture_loader_builds_deterministic_page() -> None:
@@ -35,7 +36,25 @@ def test_dry_run_maps_fixture_without_database_writes() -> None:
     assert summary.exchanges_inserted == 3
     assert summary.vendor_ids_inserted == 5
     assert summary.aliases_inserted == 10
+    assert summary.warnings == 0
     assert summary.errors == 0
+
+
+def test_sync_summary_health_payload_is_stable_for_fixture_dry_run() -> None:
+    summary = MassiveSymbolSyncJob().run(SyncOptions(fixture=FIXTURES, dry_run=True))
+
+    health = summary.health_payload()
+
+    assert health["counts"]["records_seen"] == 5
+    assert health["counts"]["inserted"] == 5
+    assert health["counts"]["warned"] == 0
+    assert health["warnings"] == {"total": 0, "categories": {}}
+    assert health["active_inactive_diffs"] == {
+        "deactivated_count": 0,
+        "reactivated_count": 0,
+        "deactivated": [],
+        "reactivated": [],
+    }
 
 
 def test_failure_path_marks_run_failed_and_preserves_counts(monkeypatch) -> None:
@@ -50,6 +69,9 @@ def test_failure_path_marks_run_failed_and_preserves_counts(monkeypatch) -> None
 
         def start_run(self, **_kwargs: object) -> int:
             return 123
+
+        def latest_successful_active_states(self, **_kwargs: object) -> dict[tuple[str, str, str], object]:
+            return {}
 
         def insert_raw_payload(self, **_kwargs: object) -> object:
             raise RuntimeError("page fixture://boom failed")

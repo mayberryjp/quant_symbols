@@ -117,3 +117,52 @@ The current Day 2 schema does not include a separate raw page/request diagnostic
 table or request URL column. This implementation stores exact raw result payloads
 unchanged, stores request parameters on `vendor_api_runs`, and records failure
 messages on failed runs.
+
+## Day 5 Symbol Quality And Reporting
+
+The repository now includes the first symbol-master quality layer under
+`src/quant_symbols/symbol_master/data_quality.py`.
+
+Implemented checks:
+
+- Duplicate canonical ticker inside the same `locale + market` boundary emits a
+  `duplicate_canonical_ticker` error finding.
+- Missing or blank provider fields emit `missing_field` warnings for name,
+  exchange, currency, market, locale, security type, active flag, and vendor
+  identifier.
+- Unsupported or unknown provider classifications emit
+  `unsupported_security_type` warnings and remain mapped instead of being
+  dropped.
+- Unexpected U.S. stock/ETF universe values emit
+  `unexpected_us_universe_value` warnings for market, locale, or currency.
+- Active/inactive diffs compare the current run against raw payloads from the
+  prior successful Massive ticker-reference run. Failed runs are not used as the
+  diff baseline.
+
+Day 5 adds Alembic revision `0002_symbol_quality_reporting`, which adds
+`sync_summary jsonb` and `quality_findings jsonb` to
+`symbol_master.vendor_api_runs`. The sync job writes a normalized summary and
+finding records when a run completes or fails.
+
+Operator commands:
+
+```bash
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive
+python3 -m quant_symbols.cli symbols quality --latest
+python3 -m quant_symbols.cli symbols sync-summary --latest
+```
+
+`symbols sync-summary --latest` reports inserted, updated, unchanged,
+deactivated, reactivated, skipped, warned, and errored counts from the persisted
+summary payload. `symbols quality --latest` reports total warning/error counts
+and category totals for the latest run.
+
+The read-only backend app lives in `src/quant_symbols/api.py` and exposes:
+
+```text
+GET /jobs/symbol-sync/latest
+```
+
+The response is domain-shaped and includes run id, status, started/completed
+timestamps, counts, warning/error totals, active/inactive diffs, and top warning
+categories. It does not expose raw Massive/Polygon page payloads.
