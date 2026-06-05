@@ -459,3 +459,46 @@ MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live
 
 Expected output is JSON containing `status`, `count`, `request_id`, and
 `tickers`. Do not commit or paste a real `MASSIVE_API_KEY`.
+
+## Issue 35 Slice 1 Raw Payload Normalization
+
+The #35 Slice 1 pure raw-payload mapper is implemented in
+`src/quant_symbols/symbol_master/normalization.py`. It accepts one raw
+Massive/Polygon ticker-reference dictionary and returns a frozen
+`MassiveTickerCandidate` without calling HTTP services, requiring a database, or
+mutating the input dictionary.
+
+The mapper currently normalizes these fields:
+
+- source ticker exactly as provided and canonical ticker uppercased
+- name, market, locale, primary exchange code, and currency name
+- provider type plus internal `asset_type` and `security_type`
+- active flag
+- CIK, composite FIGI, and share-class FIGI
+- parsed `last_updated_utc` and `delisted_utc` timestamps when valid
+- a copied raw provider dictionary on `raw_record`
+
+Verified type mapping for this slice:
+
+- `CS` maps to `asset_type=equity`, `security_type=common_stock`
+- `ETF` maps to `asset_type=fund`, `security_type=etf`
+- unknown or missing provider types map to `asset_type=unknown`,
+  `security_type=unknown`, while preserving the provider type on the candidate
+
+This slice does not write exchanges, symbols, vendor IDs, aliases, or raw
+payload rows. It does not score quality, decide trade eligibility, call Massive,
+or require `MASSIVE_API_KEY`.
+
+Verified commands:
+
+```bash
+python3 -m pytest tests/test_symbol_master_normalization.py -q
+python3 -m pytest tests/test_symbol_master_mapper.py -q
+```
+
+Observed output:
+
+```text
+7 passed
+8 passed
+```
