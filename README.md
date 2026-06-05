@@ -39,6 +39,61 @@ docker compose down -v
 
 The `docker compose down -v` command deletes the local Postgres volume.
 
+## Project Docker Image
+
+The repository includes a Python 3.12 dev/debug image that installs the package
+and development dependencies from `pyproject.toml`. Docker is required for
+these checks. Postgres and `MASSIVE_API_KEY` are not required for the default
+image smoke command or tests.
+
+Build the image:
+
+```bash
+docker build -t quant-symbols:dev .
+```
+
+Confirm Python and Massive/Polygon smoke behavior:
+
+```bash
+docker run --rm quant-symbols:dev python3 --version
+docker run --rm quant-symbols:dev python3 -m quant_symbols.vendors.massive.cli
+```
+
+Expected Python output starts with `Python 3.12`. Expected smoke output:
+
+```text
+live check disabled; pass --live with MASSIVE_API_KEY set
+```
+
+Run tests inside the image:
+
+```bash
+docker run --rm quant-symbols:dev python3 -m pytest -q
+```
+
+Expected output is a passing pytest summary.
+
+Open a shell for debugging:
+
+```bash
+docker run --rm -it quant-symbols:dev bash
+```
+
+If an interactive shell is not available in the current worker, use a
+non-interactive shell check:
+
+```bash
+docker run --rm quant-symbols:dev bash -lc 'pwd && python3 --version'
+```
+
+Expected output includes `/app` and a Python 3.12 version line.
+
+Remove the local image when done:
+
+```bash
+docker image rm quant-symbols:dev
+```
+
 ## Database Schema
 
 Database schema and migration files are owned by the database engineer. Keep executable migration artifacts in the database engineer's migration path, not under `infra/postgres`.
