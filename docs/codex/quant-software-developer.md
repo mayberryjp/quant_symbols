@@ -560,6 +560,116 @@ python3 -m pytest -q
 Cleanup after optional Docker validation is `docker compose down`, or
 `docker compose down -v` if the local Postgres volume should be deleted.
 
+## Issue 35 Slice 5 Normalize Raw Operator Command
+
+The #35 Slice 5 operator command is implemented on the existing symbol-master
+CLI surface:
+
+```bash
+python3 -m quant_symbols.cli symbols normalize-raw --latest
+python3 -m quant_symbols.cli symbols normalize-raw --run-id <vendor_api_run_id>
+```
+
+The command is wired in `src/quant_symbols/_cli_impl.py` and calls
+`MassiveRawNormalizeJob` in
+`src/quant_symbols/symbol_master/massive_raw_normalize.py`. It does not
+construct `MassiveClient`, call Massive/Polygon, fetch provider pages, create a
+new vendor API run, or require `MASSIVE_API_KEY`.
+
+Implemented behavior:
+
+- `--latest` selects the latest successful `massive`
+  `/v3/reference/tickers` vendor run that already has raw payload rows.
+- `--run-id` normalizes raw payload rows for exactly the requested run id and
+  the `massive` vendor source.
+- each raw row is mapped through `map_massive_ticker_raw_record`
+- exchange rows are written through `upsert_exchange_candidate`
+- symbol and vendor identity rows are written through
+  `upsert_symbol_vendor_identity_candidate`
+- aliases are written through `upsert_aliases_for_massive_candidate`
+- missing required symbol fields are counted as skipped/errors before
+  normalized database writes are attempted
+- an empty selected run prints an `ok` summary with `raw_records=0`
+
+The command prints one summary line. Verified help output:
+
+```text
+usage: python3 -m quant_symbols.cli symbols normalize-raw [-h]
+                                                          (--latest | --run-id RUN_ID)
+
+optional arguments:
+  -h, --help       show this help message and exit
+  --latest
+  --run-id RUN_ID
+```
+
+Summary output shape:
+
+```text
+symbols_normalize_raw=ok vendor=massive run_id=<id-or-none> raw_records=<n> symbols_inserted=<n> symbols_updated=<n> symbols_unchanged=<n> exchanges_inserted=<n> exchanges_updated=<n> exchanges_unchanged=<n> exchanges_skipped=<n> vendor_ids_inserted=<n> vendor_ids_updated=<n> vendor_ids_unchanged=<n> aliases_inserted=<n> aliases_unchanged=<n> skipped=<n> errors=<n>
+```
+
+Tables read:
+
+- `symbol_master.vendor_sources`
+- `symbol_master.vendor_api_runs`
+- `symbol_master.raw_vendor_payloads`
+
+Tables written through existing repository methods:
+
+- `symbol_master.exchanges`
+- `symbol_master.symbols`
+- `symbol_master.symbol_vendor_ids`
+- `symbol_master.symbol_aliases`
+
+Focused tests live in `tests/test_symbol_master_normalize_raw.py`. They verify
+CLI parser exposure, no-API-key command invocation through a fake job,
+`--latest` selection, exact `--run-id` selection, orchestration through
+exchange/symbol/vendor-id/alias layers, idempotent repeated normalization,
+empty selected runs, and bad-row skip/error counting.
+
+Verified commands in this checkout:
+
+```bash
+python3 -m pytest tests/test_symbol_master_normalize_raw.py -q
+python3 -m pytest tests/test_symbol_master_normalization.py tests/test_symbol_master_exchange_upsert.py tests/test_symbol_master_symbol_vendor_upsert.py tests/test_symbol_master_alias_upsert.py -q
+python3 -m pytest -q
+python3 -m quant_symbols.cli symbols normalize-raw --help
+docker compose up -d postgres
+```
+
+Observed output:
+
+```text
+8 passed in 0.04s
+25 passed in 0.06s
+103 passed in 0.13s
+```
+
+The `docker compose up -d postgres` command did not run in this checkout
+because the current `docker-compose.yml` defines only the `quant_symbols`
+service and Docker Compose returned:
+
+```text
+no such service: postgres
+```
+
+As a result, the fixture sync plus Postgres-backed `normalize-raw` verification
+was not executed here. Jar verification needs either a compose file with a
+`postgres` service or an externally reachable Postgres database through
+`DATABASE_URL` before these DB-backed commands can be run:
+
+```bash
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli db verify
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive --max-pages 1
+python3 -m quant_symbols.cli symbols normalize-raw --latest
+python3 -m quant_symbols.cli symbols normalize-raw --latest
+```
+
+Cleanup after a successful Docker-backed verification is `docker compose down`,
+or `docker compose down -v` if the local Postgres volume should be deleted.
+
 ## Issue 35 Slice 3 Symbol And Vendor ID Upsert
 
 The #35 Slice 3 symbol/vendor-identity path is implemented by

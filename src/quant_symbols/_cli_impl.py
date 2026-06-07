@@ -192,6 +192,16 @@ def symbols_sync_summary(args: argparse.Namespace) -> None:
     )
 
 
+def symbols_normalize_raw(args: argparse.Namespace) -> None:
+    from quant_symbols.symbol_master.massive_raw_normalize import MassiveRawNormalizeJob
+
+    summary = MassiveRawNormalizeJob(engine=_engine()).run(
+        latest=args.latest,
+        run_id=args.run_id,
+    )
+    print(summary.format_line())
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python3 -m quant_symbols.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -224,6 +234,12 @@ def build_parser() -> argparse.ArgumentParser:
     summary_parser = symbols_subparsers.add_parser("sync-summary")
     summary_parser.add_argument("--latest", action="store_true", required=True)
     summary_parser.set_defaults(func=symbols_sync_summary)
+
+    normalize_raw_parser = symbols_subparsers.add_parser("normalize-raw")
+    normalize_raw_selector = normalize_raw_parser.add_mutually_exclusive_group(required=True)
+    normalize_raw_selector.add_argument("--latest", action="store_true")
+    normalize_raw_selector.add_argument("--run-id", type=int)
+    normalize_raw_parser.set_defaults(func=symbols_normalize_raw)
 
     return parser
 

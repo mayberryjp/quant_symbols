@@ -22,6 +22,13 @@ class RawPayloadLink:
 
 
 @dataclass(frozen=True)
+class RawPayloadRow:
+    id: int
+    payload: dict[str, Any]
+    provider_ticker: str | None = None
+
+
+@dataclass(frozen=True)
 class ExchangeUpsertResult:
     exchange_id: int | None
     counts: dict[str, int]
@@ -181,6 +188,57 @@ class SymbolMasterRepository:
             )
         ).mappings().first()
         return dict(row) if row is not None else None
+
+    def latest_successful_massive_ticker_run_with_payloads(self) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            _text(
+                """
+                SELECT r.id, v.code AS vendor, r.endpoint, r.status, r.started_at, r.finished_at,
+                       r.records_seen, r.records_inserted, r.records_failed
+                FROM symbol_master.vendor_api_runs r
+                JOIN symbol_master.vendor_sources v ON v.id = r.vendor_source_id
+                WHERE v.code = 'massive'
+                  AND r.endpoint = '/v3/reference/tickers'
+                  AND r.status = 'succeeded'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM symbol_master.raw_vendor_payloads p
+                      WHERE p.vendor_api_run_id = r.id
+                        AND p.vendor_source_id = r.vendor_source_id
+                  )
+                ORDER BY r.finished_at DESC NULLS LAST, r.started_at DESC, r.id DESC
+                LIMIT 1
+                """
+            )
+        ).mappings().first()
+        return dict(row) if row is not None else None
+
+    def raw_payload_rows_for_run(
+        self,
+        *,
+        vendor_source_id: int,
+        run_id: int,
+    ) -> tuple[RawPayloadRow, ...]:
+        rows = self.connection.execute(
+            _text(
+                """
+                SELECT id, provider_ticker, payload
+                FROM symbol_master.raw_vendor_payloads
+                WHERE vendor_source_id = :vendor_source_id
+                  AND vendor_api_run_id = :run_id
+                ORDER BY id
+                """
+            ),
+            {"vendor_source_id": vendor_source_id, "run_id": run_id},
+        ).mappings().all()
+        return tuple(
+            RawPayloadRow(
+                id=int(row["id"]),
+                provider_ticker=row["provider_ticker"],
+                payload=dict(row["payload"]),
+            )
+            for row in rows
+        )
 
     def upsert_exchange_candidate(self, exchange: MassiveExchangeCandidate | None) -> ExchangeUpsertResult:
         counts: dict[str, int] = {}
