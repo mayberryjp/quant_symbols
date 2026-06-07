@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from pathlib import Path
 
@@ -115,6 +116,11 @@ def _parse_active(value: str) -> bool | None:
 
 def symbols_sync(args: argparse.Namespace) -> None:
     from quant_symbols.symbol_master.massive_sync import MassiveSymbolSyncJob, SyncOptions
+    from quant_symbols.vendors.massive.errors import (
+        MassiveAuthError,
+        MassiveConfigError,
+        MassiveRateLimitError,
+    )
 
     options = SyncOptions(
         fixture=Path(args.fixture) if args.fixture else None,
@@ -129,6 +135,25 @@ def symbols_sync(args: argparse.Namespace) -> None:
     job = MassiveSymbolSyncJob(engine=engine)
     try:
         summary = job.run(options)
+    except MassiveConfigError as exc:
+        print(f"ERROR: {exc}")
+        print("  Hint: set MASSIVE_API_KEY in your environment or .env file.")
+        raise SystemExit(1) from exc
+    except MassiveAuthError as exc:
+        print(f"ERROR: {exc} (HTTP {exc.status_code})")
+        print("  Hint: your MASSIVE_API_KEY may be invalid or expired.")
+        raise SystemExit(1) from exc
+    except MassiveRateLimitError as exc:
+        print(f"ERROR: {exc} (HTTP {exc.status_code})")
+        if exc.retry_after_seconds is not None:
+            print(f"  Hint: retry after {exc.retry_after_seconds:.0f}s, or increase MASSIVE_PAGE_DELAY_SECONDS (current default: 12s).")
+        else:
+            print("  Hint: increase MASSIVE_PAGE_DELAY_SECONDS (current default: 12s) or reduce --limit.")
+        raise SystemExit(1) from exc
+    except ConnectionError as exc:
+        print(f"ERROR: could not connect to Polygon API: {exc}")
+        print("  Hint: check your network connection and MASSIVE_BASE_URL.")
+        raise SystemExit(1) from exc
     except Exception as exc:
         from quant_symbols.symbol_master.summary import SyncSummary
 
@@ -139,6 +164,7 @@ def symbols_sync(args: argparse.Namespace) -> None:
             error_message=str(exc),
         )
         print(summary.format_line())
+        print(f"ERROR: {exc}")
         raise SystemExit(1) from exc
     print(summary.format_line())
     if summary.status == "failed":
@@ -203,6 +229,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)-8s %(name)s  %(message)s",
+        datefmt="%H:%M:%S",
+        level=logging.INFO,
+    )
     parser = build_parser()
     args = parser.parse_args(argv)
     args.func(args)

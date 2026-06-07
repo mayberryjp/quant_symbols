@@ -7,16 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates \
+    && apt-get install -y --no-install-recommends bash ca-certificates git vim \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md ./
-COPY src ./src
-COPY quant_symbols ./quant_symbols
-COPY alembic.ini ./
-COPY alembic ./alembic
-COPY migrations ./migrations
-COPY tests ./tests
+RUN git clone https://github.com/mayberryjp/quant_symbols.git .
 
 RUN python3 -m pip install --upgrade pip \
     && python3 -m pip install -e ".[dev]"

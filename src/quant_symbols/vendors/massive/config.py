@@ -13,6 +13,7 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_RETRY_COUNT = 3
 DEFAULT_BACKOFF_SECONDS = 0.5
 DEFAULT_BACKOFF_MULTIPLIER = 2.0
+DEFAULT_PAGE_DELAY_SECONDS = 12.0
 
 
 def _env_value(name: str) -> str | None:
@@ -62,6 +63,7 @@ class MassiveConfig:
     retry_count: int = DEFAULT_RETRY_COUNT
     backoff_seconds: float = DEFAULT_BACKOFF_SECONDS
     backoff_multiplier: float = DEFAULT_BACKOFF_MULTIPLIER
+    page_delay_seconds: float = DEFAULT_PAGE_DELAY_SECONDS
 
     def __post_init__(self) -> None:
         if not self.base_url:
@@ -83,7 +85,8 @@ class MassiveConfig:
             f"timeout_seconds={self.timeout_seconds!r}, "
             f"retry_count={self.retry_count!r}, "
             f"backoff_seconds={self.backoff_seconds!r}, "
-            f"backoff_multiplier={self.backoff_multiplier!r})"
+            f"backoff_multiplier={self.backoff_multiplier!r}, "
+            f"page_delay_seconds={self.page_delay_seconds!r})"
         )
 
     @classmethod
@@ -108,5 +111,9 @@ class MassiveConfig:
             backoff_multiplier=_float_from_env(
                 "MASSIVE_BACKOFF_MULTIPLIER",
                 DEFAULT_BACKOFF_MULTIPLIER,
+            ),
+            page_delay_seconds=_float_from_env(
+                "MASSIVE_PAGE_DELAY_SECONDS",
+                DEFAULT_PAGE_DELAY_SECONDS,
             ),
         )

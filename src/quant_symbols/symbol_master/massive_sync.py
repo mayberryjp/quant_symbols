@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,8 @@ from quant_symbols.symbol_master.repository import SymbolMasterRepository
 from quant_symbols.symbol_master.summary import SyncSummary
 from quant_symbols.vendors.massive import MassiveClient
 from quant_symbols.vendors.massive.models import TickerReferencePage
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -38,9 +41,13 @@ class MassiveSymbolSyncJob:
     def run(self, options: SyncOptions) -> SyncSummary:
         mode = "fixture" if options.fixture is not None else "live"
         summary = SyncSummary(mode=mode)
+        log.info("sync starting  mode=%s market=%s locale=%s limit=%d max_pages=%s",
+                 mode, options.market, options.locale, options.limit, options.max_pages)
         if options.dry_run:
+            log.info("dry-run enabled — no database writes")
             pages = self._pages(options)
             self._process_pages(pages, summary, repository=None, run_id=None, vendor_source_id=None)
+            log.info("sync finished  %s", summary.format_line())
             return summary
         if self.engine is None:
             raise RuntimeError("DATABASE_URL/SQLAlchemy engine is required unless --dry-run is used")
@@ -53,6 +60,7 @@ class MassiveSymbolSyncJob:
                 request_params=_request_params(options),
             )
             summary.run_id = run_id
+            log.info("database run started  run_id=%d", run_id)
             try:
                 pages = self._pages(options)
                 self._process_pages(
@@ -66,6 +74,7 @@ class MassiveSymbolSyncJob:
                 summary.status = "failed"
                 summary.errors += 1
                 summary.error_message = str(exc)
+                log.error("sync failed  run_id=%d error=%s", run_id, exc)
                 repository.finish_run(
                     run_id=run_id,
                     status="failed",
@@ -82,6 +91,7 @@ class MassiveSymbolSyncJob:
                 records_inserted=summary.raw_payloads,
                 records_failed=summary.errors,
             )
+        log.info("sync finished  %s", summary.format_line())
         return summary
 
     def latest_summary(self) -> dict[str, Any] | None:
@@ -120,14 +130,18 @@ class MassiveSymbolSyncJob:
         dry_run_aliases: set[tuple[str, str]] = set()
         for page in pages:
             summary.pages += 1
+            page_records = len(page.results)
+            log.info("page %d received  records=%d", summary.pages, page_records)
             for reference in page.results:
                 summary.records_seen += 1
                 mapped = map_ticker_reference(reference)
                 for warning in mapped.warnings:
+                    log.warning("%s: %s", reference.ticker, warning)
                     summary.add_warning(f"{reference.ticker}: {warning}")
                 if mapped.candidate is None:
                     summary.skipped += 1
                     if mapped.skipped_reason:
+                        log.debug("%s: skipped: %s", reference.ticker, mapped.skipped_reason)
                         summary.add_warning(f"{reference.ticker}: skipped: {mapped.skipped_reason}")
                     continue
                 if repository is None:

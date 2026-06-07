@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 import time
 from typing import Any, Callable, Iterator, Mapping
@@ -19,6 +20,8 @@ from quant_symbols.vendors.massive.transport import Transport, UrllibTransport, 
 
 
 SleepFunc = Callable[[float], None]
+
+log = logging.getLogger(__name__)
 
 
 class MassiveClient:
@@ -91,7 +94,11 @@ class MassiveClient:
         while next_url:
             if max_pages is not None and pages_seen >= max_pages:
                 return
+            if pages_seen > 0 and self.config.page_delay_seconds > 0:
+                log.info("throttling %.1fs before page %d", self.config.page_delay_seconds, pages_seen + 1)
+                self._sleep(self.config.page_delay_seconds)
             request_url = self._with_api_key(next_url)
+            log.info("requesting page %d  url=%s", pages_seen + 1, self._redact_api_key(request_url))
             payload = self._request_json(request_url)
             fetched_at = datetime.now(timezone.utc)
             page = TickerReferencePage.from_payload(
@@ -159,10 +166,12 @@ class MassiveClient:
             retry_after = _retry_after_seconds(response.headers)
             if response.status_code == 429:
                 if attempt < max_attempts - 1:
-                    self._sleep(retry_after if retry_after is not None else self._backoff_for(attempt))
+                    wait = retry_after if retry_after is not None else self._backoff_for(attempt)
+                    log.warning("rate limited (429)  attempt=%d/%d  waiting=%.1fs", attempt + 1, max_attempts, wait)
+                    self._sleep(wait)
                     continue
                 raise MassiveRateLimitError(
-                    "Massive/Polygon rate limit exceeded",
+                    "Massive/Polygon rate limit exceeded after all retries",
                     status_code=response.status_code,
                     body=body,
                     retry_after_seconds=retry_after,
@@ -170,7 +179,9 @@ class MassiveClient:
 
             if 500 <= response.status_code < 600:
                 if attempt < max_attempts - 1:
-                    self._sleep(self._backoff_for(attempt))
+                    wait = self._backoff_for(attempt)
+                    log.warning("server error (%d)  attempt=%d/%d  waiting=%.1fs", response.status_code, attempt + 1, max_attempts, wait)
+                    self._sleep(wait)
                     continue
                 raise MassiveServerError(
                     "Massive/Polygon server error after retries",
