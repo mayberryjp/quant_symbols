@@ -13,6 +13,11 @@ RUN apt-get update \
 RUN git clone https://github.com/mayberryjp/quant_symbols.git .
 
 RUN python3 -m pip install --upgrade pip \
-    && python3 -m pip install -e ".[dev]"
+    && python3 -m pip install -e ".[dev]" \
+    && python3 -m pip install supervisor
 
-CMD ["bash"]
+COPY supervisord.conf /etc/supervisor/supervisord.conf
+
+ENV SYNC_INTERVAL=86400
+
+CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]

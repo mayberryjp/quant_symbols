@@ -131,44 +131,61 @@ def symbols_sync(args: argparse.Namespace) -> None:
         locale=args.locale,
         limit=args.limit,
     )
-    engine = None if args.dry_run else _engine()
-    job = MassiveSymbolSyncJob(engine=engine)
-    try:
-        summary = job.run(options)
-    except MassiveConfigError as exc:
-        print(f"ERROR: {exc}")
-        print("  Hint: set MASSIVE_API_KEY in your environment or .env file.")
-        raise SystemExit(1) from exc
-    except MassiveAuthError as exc:
-        print(f"ERROR: {exc} (HTTP {exc.status_code})")
-        print("  Hint: your MASSIVE_API_KEY may be invalid or expired.")
-        raise SystemExit(1) from exc
-    except MassiveRateLimitError as exc:
-        print(f"ERROR: {exc} (HTTP {exc.status_code})")
-        if exc.retry_after_seconds is not None:
-            print(f"  Hint: retry after {exc.retry_after_seconds:.0f}s, or increase MASSIVE_PAGE_DELAY_SECONDS (current default: 12s).")
-        else:
-            print("  Hint: increase MASSIVE_PAGE_DELAY_SECONDS (current default: 12s) or reduce --limit.")
-        raise SystemExit(1) from exc
-    except ConnectionError as exc:
-        print(f"ERROR: could not connect to Polygon API: {exc}")
-        print("  Hint: check your network connection and MASSIVE_BASE_URL.")
-        raise SystemExit(1) from exc
-    except Exception as exc:
-        from quant_symbols.symbol_master.summary import SyncSummary
 
-        summary = SyncSummary(
-            mode="fixture" if args.fixture else "live",
-            status="failed",
-            errors=1,
-            error_message=str(exc),
-        )
-        print(summary.format_line())
-        print(f"ERROR: {exc}")
-        raise SystemExit(1) from exc
-    print(summary.format_line())
-    if summary.status == "failed":
-        raise SystemExit(1)
+    interval = getattr(args, "schedule", None)
+    run_once = interval is None
+
+    import time as _time
+    while True:
+        engine = None if args.dry_run else _engine()
+        job = MassiveSymbolSyncJob(engine=engine)
+        try:
+            summary = job.run(options)
+            print(summary.format_line())
+            if summary.status == "failed" and run_once:
+                raise SystemExit(1)
+        except MassiveConfigError as exc:
+            print(f"ERROR: {exc}")
+            print("  Hint: set MASSIVE_API_KEY in your environment or .env file.")
+            if run_once:
+                raise SystemExit(1) from exc
+        except MassiveAuthError as exc:
+            print(f"ERROR: {exc} (HTTP {exc.status_code})")
+            print("  Hint: your MASSIVE_API_KEY may be invalid or expired.")
+            if run_once:
+                raise SystemExit(1) from exc
+        except MassiveRateLimitError as exc:
+            print(f"ERROR: {exc} (HTTP {exc.status_code})")
+            if exc.retry_after_seconds is not None:
+                print(f"  Hint: retry after {exc.retry_after_seconds:.0f}s, or increase MASSIVE_PAGE_DELAY_SECONDS (current default: 12s).")
+            else:
+                print("  Hint: increase MASSIVE_PAGE_DELAY_SECONDS (current default: 12s) or reduce --limit.")
+            if run_once:
+                raise SystemExit(1) from exc
+        except ConnectionError as exc:
+            print(f"ERROR: could not connect to Polygon API: {exc}")
+            print("  Hint: check your network connection and MASSIVE_BASE_URL.")
+            if run_once:
+                raise SystemExit(1) from exc
+        except Exception as exc:
+            from quant_symbols.symbol_master.summary import SyncSummary
+
+            summary = SyncSummary(
+                mode="fixture" if args.fixture else "live",
+                status="failed",
+                errors=1,
+                error_message=str(exc),
+            )
+            print(summary.format_line())
+            print(f"ERROR: {exc}")
+            if run_once:
+                raise SystemExit(1) from exc
+
+        if run_once:
+            break
+
+        logging.getLogger(__name__).info("next sync in %d seconds", interval)
+        _time.sleep(interval)
 
 
 def symbols_sync_summary(args: argparse.Namespace) -> None:
@@ -229,6 +246,8 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("--market", default="stocks")
     sync_parser.add_argument("--locale", default="us")
     sync_parser.add_argument("--limit", type=int, default=1000)
+    sync_parser.add_argument("--schedule", type=int, metavar="SECONDS",
+                             help="Run continuously, sleeping SECONDS between syncs (e.g. 86400 for daily)")
     sync_parser.set_defaults(func=symbols_sync)
 
     summary_parser = symbols_subparsers.add_parser("sync-summary")
