@@ -16,6 +16,7 @@ RUN python3 -m pip install --upgrade pip \
     && python3 -m pip install -e ".[dev]" \
     && python3 -m pip install supervisor
 
-ENV SYNC_INTERVAL=86400
+ENV API_PORT=8000 \
+    SYNC_INTERVAL=86400
 
 CMD ["supervisord", "-c", "/app/supervisord.conf"]
