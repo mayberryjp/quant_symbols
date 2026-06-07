@@ -560,6 +560,135 @@ python3 -m pytest -q
 Cleanup after optional Docker validation is `docker compose down`, or
 `docker compose down -v` if the local Postgres volume should be deleted.
 
+## Issue 41 Slice 1 API Runtime Foundation
+
+The #41 Slice 1 backend API foundation is implemented under
+`src/quant_symbols/api/`.
+
+Implemented modules:
+
+- `app.py`: FastAPI app factory, module-level `app`, `GET /health`, and
+  `GET /ready`
+- `readiness.py`: lazy database readiness check using `DATABASE_URL`
+- `__init__.py`: package exports for the API app factory and app
+
+The API does not connect to Postgres at import time. `GET /health` is a process
+liveness check and does not require `DATABASE_URL` or database access.
+`GET /ready` connects only when called. It checks `SELECT 1`, the Alembic
+version, and the seven expected `symbol_master` tables:
+
+- `vendor_sources`
+- `vendor_api_runs`
+- `raw_vendor_payloads`
+- `exchanges`
+- `symbols`
+- `symbol_vendor_ids`
+- `symbol_aliases`
+
+The expected schema version remains
+`0001_symbol_master_vendor_traceability`.
+
+Endpoint examples verified in this checkout:
+
+```bash
+python3 -m uvicorn quant_symbols.api.app:app --host 127.0.0.1 --port 8000
+curl -fsS http://127.0.0.1:8000/health
+curl -i http://127.0.0.1:8000/ready
+```
+
+Observed `/health` response:
+
+```json
+{"status":"ok","service":"quant-symbols-api"}
+```
+
+Observed `/ready` response without `DATABASE_URL`:
+
+```text
+HTTP/1.1 503 Service Unavailable
+```
+
+```json
+{"status":"not_ready","database":"error","error":"DATABASE_URL is not configured"}
+```
+
+When `DATABASE_URL` points to a reachable migrated database, `/ready` should
+return:
+
+```json
+{"status":"ok","database":"ok","schema_version":"0001_symbol_master_vendor_traceability","tables":7}
+```
+
+Jar external database verification:
+
+```bash
+export DATABASE_URL='postgresql+psycopg://USER:PASSWORD@HOST:5432/DBNAME'
+python3 -m quant_symbols.cli db upgrade
+python3 -m uvicorn quant_symbols.api.app:app --host 127.0.0.1 --port 8000
+curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/ready
+```
+
+`DATABASE_URL` is not required for `/health`, API import, or unit tests that
+inject the readiness dependency. `DATABASE_URL` is required for a successful
+real `/ready` database check. Error responses redact full secret-bearing
+database URLs when they appear in readiness exceptions.
+
+Supervisor/container contract:
+
+- `supervisord.conf` defines `[program:quant-symbols-api]`.
+- Command:
+  `python3 -m uvicorn quant_symbols.api.app:app --host 0.0.0.0 --port %(ENV_API_PORT)s`
+- The API program has `autostart=true`, `autorestart=true`, stdout/stderr
+  logging, and `PYTHONUNBUFFERED=1`.
+- `Dockerfile` sets `API_PORT=8000`.
+- The existing `[program:symbols-sync]` remains defined but now has
+  `autostart=false` so API-only container verification does not start a live
+  Massive sync loop by default.
+
+No Postgres service was added to `docker-compose.yml`. Database-backed API
+readiness assumes an externally supplied `DATABASE_URL`.
+
+Verified commands in this checkout:
+
+```bash
+python3 -m pytest tests/test_api_app.py -q
+python3 -m pytest -q
+python3 - <<'PY'
+from quant_symbols.api.app import app
+print(app.title)
+PY
+python3 -m uvicorn quant_symbols.api.app:app --host 127.0.0.1 --port 8000
+curl -fsS http://127.0.0.1:8000/health
+curl -i http://127.0.0.1:8000/ready
+```
+
+Observed test output:
+
+```text
+5 passed in 0.31s
+108 passed in 0.43s
+quant-symbols-api
+```
+
+The host project install command `python3 -m pip install -e ".[dev]"` was not
+usable in this runner because the available host interpreter reports Python
+3.8.10 and the project requires Python `>=3.12`. For smoke validation only,
+FastAPI, HTTPX, and Uvicorn were installed directly into the runner user site.
+Docker CLI was present, but the Docker daemon was not reachable, so container
+build/run smoke was not executed.
+
+Cleanup after the local Uvicorn smoke is `Ctrl-C` in the server shell. No
+database or container cleanup was needed in this checkout.
+
+Known limitations for this slice:
+
+- There are no `GET /symbols` list/search endpoints yet.
+- There are no symbol detail endpoints yet.
+- There are no vendor traceability endpoints yet.
+- No endpoint triggers Massive/Polygon calls, sync jobs, normalization jobs,
+  trading logic, or momentum logic.
+
 ## Issue 35 Slice 5 Normalize Raw Operator Command
 
 The #35 Slice 5 operator command is implemented on the existing symbol-master
