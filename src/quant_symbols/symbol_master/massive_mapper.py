@@ -143,7 +143,7 @@ def _classification(provider_type: str | None, warnings: list[str]) -> tuple[str
     if normalized in {"ETS", "ETN", "ETV"}:
         return "fund", "etn"
     if normalized in {"SP", "STRUCT"}:
-        return "structured", "structured_product"
+        return "other", "structured_product"
     if normalized in {"OS"}:
         return "equity", "ordinary_shares"
     if normalized in {"GDR"}:
