@@ -560,6 +560,204 @@ python3 -m pytest -q
 Cleanup after optional Docker validation is `docker compose down`, or
 `docker compose down -v` if the local Postgres volume should be deleted.
 
+## Issue 41 Slice 5 Sync Status API
+
+The #41 Slice 5 read-only operator sync status endpoints are implemented in
+`src/quant_symbols/api/app.py` and `src/quant_symbols/api/sync_status.py`.
+They expose operator-oriented views over existing `vendor_api_runs` and linked
+raw payload counts. They do not execute jobs.
+
+Endpoints:
+
+- `GET /sync/latest?vendor=massive&endpoint=/v3/reference/tickers`
+- `GET /sync/runs?vendor=massive&endpoint=/v3/reference/tickers&status=succeeded&limit=20&offset=0`
+- `GET /sync/runs/{run_id}`
+
+`/sync/latest` defaults to vendor `massive` and endpoint
+`/v3/reference/tickers`. It returns the newest matching run regardless of run
+status. Missing runs return:
+
+```json
+{"status":"not_found","error":"sync run not found"}
+```
+
+Latest response shape:
+
+```json
+{
+  "status": "ok",
+  "latest": {
+    "id": 5,
+    "vendor": {"id": 1, "code": "massive", "name": "Massive / Polygon"},
+    "endpoint": "/v3/reference/tickers",
+    "run_status": "succeeded",
+    "started_at": "2026-06-07T09:00:00+00:00",
+    "finished_at": "2026-06-07T09:00:10+00:00",
+    "records_seen": 5,
+    "records_inserted": 5,
+    "records_failed": 0,
+    "error_message": null,
+    "raw_payload_count": 5
+  }
+}
+```
+
+`/sync/runs` supports `vendor` default `massive`, `endpoint` default
+`/v3/reference/tickers`, optional `status` limited to `running`, `succeeded`,
+`failed`, or `cancelled`, `limit` default `20` and maximum `100`, and `offset`
+default `0`. Rows are ordered by `started_at DESC, id DESC`.
+
+Run list response shape:
+
+```json
+{
+  "items": [
+    {
+      "id": 5,
+      "vendor": {"id": 1, "code": "massive", "name": "Massive / Polygon"},
+      "endpoint": "/v3/reference/tickers",
+      "run_status": "succeeded",
+      "started_at": "2026-06-07T09:00:00+00:00",
+      "finished_at": "2026-06-07T09:00:10+00:00",
+      "records_seen": 5,
+      "records_inserted": 5,
+      "records_failed": 0,
+      "error_message": null,
+      "raw_payload_count": 5
+    }
+  ],
+  "limit": 20,
+  "offset": 0,
+  "count": 1
+}
+```
+
+`/sync/runs/{run_id}` returns one run with `request_params` and
+`raw_payload_count`. Missing run ids return:
+
+```json
+{"status":"not_found","error":"sync run not found"}
+```
+
+Run detail response shape:
+
+```json
+{
+  "id": 5,
+  "vendor": {"id": 1, "code": "massive", "name": "Massive / Polygon"},
+  "endpoint": "/v3/reference/tickers",
+  "request_params": {"market": "stocks"},
+  "run_status": "succeeded",
+  "started_at": "2026-06-07T09:00:00+00:00",
+  "finished_at": "2026-06-07T09:00:10+00:00",
+  "records_seen": 5,
+  "records_inserted": 5,
+  "records_failed": 0,
+  "error_message": null,
+  "raw_payload_count": 5
+}
+```
+
+The endpoint code is read-only. It uses SQLAlchemy bound parameters, opens the
+database lazily only when an endpoint is called, does not construct a
+Massive/Polygon client, does not require `MASSIVE_API_KEY`, and does not start
+sync, normalize-raw, scheduler, worker, trading, momentum, or HTTP job execution
+logic. Repository or database failures return compact error JSON and redact a
+secret-bearing `DATABASE_URL`.
+
+Verified commands in this checkout:
+
+```bash
+python3 -m pytest tests/test_api_sync_status.py -q
+python3 -m pytest tests/test_api_app.py tests/test_api_symbols.py tests/test_api_symbol_detail.py tests/test_api_traceability.py tests/test_api_sync_status.py -q
+python3 -m pytest -q
+python3 - <<'PY'
+from quant_symbols.api.app import app
+print(app.title)
+PY
+```
+
+Observed output:
+
+```text
+11 passed in 0.46s
+46 passed in 1.00s
+149 passed in 1.17s
+quant-symbols-api
+```
+
+Local no-database smoke used this command:
+
+```bash
+python3 -m uvicorn quant_symbols.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Observed endpoint output without `DATABASE_URL`:
+
+```text
+$ curl -fsS 'http://127.0.0.1:8000/health'
+{"status":"ok","service":"quant-symbols-api"}
+
+$ curl -i 'http://127.0.0.1:8000/sync/latest'
+HTTP/1.1 500 Internal Server Error
+content-type: application/json
+
+{"status":"error","error":"DATABASE_URL is not configured"}
+
+$ curl -i 'http://127.0.0.1:8000/sync/runs?limit=5'
+HTTP/1.1 500 Internal Server Error
+content-type: application/json
+
+{"status":"error","error":"DATABASE_URL is not configured"}
+
+$ curl -i 'http://127.0.0.1:8000/sync/runs/1'
+HTTP/1.1 500 Internal Server Error
+content-type: application/json
+
+{"status":"error","error":"DATABASE_URL is not configured"}
+```
+
+Cleanup for the local smoke server was `Ctrl-C` in the Uvicorn terminal. No
+Docker container was started for this slice.
+
+External database verification was not run in this worker because no reachable
+`DATABASE_URL` was supplied. Jar can verify against an externally supplied
+migrated Postgres database with:
+
+```bash
+export DATABASE_URL='postgresql+psycopg://USER:PASSWORD@HOST:5432/DBNAME'
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive --max-pages 1
+python3 -m uvicorn quant_symbols.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Then, from another shell:
+
+```bash
+curl -fsS 'http://127.0.0.1:8000/health'
+curl -fsS 'http://127.0.0.1:8000/ready'
+curl -fsS 'http://127.0.0.1:8000/sync/latest'
+curl -fsS 'http://127.0.0.1:8000/sync/runs?limit=5'
+curl -fsS 'http://127.0.0.1:8000/sync/runs?status=succeeded&limit=5'
+curl -fsS 'http://127.0.0.1:8000/sync/runs/1'
+curl -i 'http://127.0.0.1:8000/sync/runs/999999999'
+```
+
+Expected signs are `status=ok` from `/health`, `database=ok` and
+`schema_version=0001_symbol_master_vendor_traceability` from `/ready`, the
+latest Massive ticker-reference run from `/sync/latest`, bounded sync run
+history from `/sync/runs`, and HTTP 404 for missing sync run ids.
+`DATABASE_URL` is required for `/ready` and all `/sync/...` endpoints; it is not
+required for `/health`.
+
+Postgres compose was not added. `supervisord.conf`, `Dockerfile`, and
+`docker-compose.yml` were not changed in this slice, so the existing persistent
+`quant-symbols-api` supervisord process contract remains in place.
+
+Known limitations: this slice does not add HTTP-triggered jobs, `POST /jobs`,
+`POST /sync`, `POST /normalize-raw`, background workers, auth, frontend work,
+live Massive calls, or scheduler behavior.
+
 ## Issue 41 Slice 4 Vendor Traceability API
 
 The #41 Slice 4 read-only traceability endpoints are implemented in
