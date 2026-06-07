@@ -560,6 +560,246 @@ python3 -m pytest -q
 Cleanup after optional Docker validation is `docker compose down`, or
 `docker compose down -v` if the local Postgres volume should be deleted.
 
+## Issue 41 Slice 4 Vendor Traceability API
+
+The #41 Slice 4 read-only traceability endpoints are implemented in
+`src/quant_symbols/api/app.py` and `src/quant_symbols/api/traceability.py`.
+They expose aliases, vendor IDs, raw payload links, and vendor API runs without
+embedding traceability data in normal symbol list/detail responses.
+
+Endpoints:
+
+- `GET /symbols/{symbol_id}/aliases`
+- `GET /symbols/{symbol_id}/vendor-ids`
+- `GET /symbols/{symbol_id}/raw-payloads?limit=50&offset=0`
+- `GET /vendor-runs?vendor=massive&endpoint=/v3/reference/tickers&status=succeeded&limit=20&offset=0`
+- `GET /vendor-runs/{run_id}`
+
+Symbol-scoped traceability endpoints first check that the normalized symbol id
+exists. Missing symbols return:
+
+```json
+{"status":"not_found","error":"symbol not found"}
+```
+
+Existing symbols with no traceability rows return HTTP 200 with an empty
+`items` list. `raw-payloads` is bounded with `limit` default `50`, minimum `1`,
+maximum `100`, and `offset` default `0`, minimum `0`.
+
+Alias response shape:
+
+```json
+{
+  "symbol_id": 1,
+  "items": [
+    {
+      "id": 10,
+      "alias_type": "ticker",
+      "alias_value": "AAPL",
+      "active": true,
+      "source_vendor": {"id": 1, "code": "massive", "name": "Massive / Polygon"},
+      "source_payload_id": 100,
+      "valid_from": null,
+      "valid_to": null
+    }
+  ],
+  "count": 1
+}
+```
+
+Vendor ID response shape:
+
+```json
+{
+  "symbol_id": 1,
+  "items": [
+    {
+      "id": 20,
+      "vendor": {"id": 1, "code": "massive", "name": "Massive / Polygon"},
+      "vendor_symbol": "AAPL",
+      "vendor_asset_id": "BBG000B9XRY4",
+      "active": true,
+      "first_seen_run_id": 5,
+      "first_seen_payload_id": 100,
+      "last_seen_run_id": 5,
+      "last_seen_payload_id": 100
+    }
+  ],
+  "count": 1
+}
+```
+
+Raw payload response shape:
+
+```json
+{
+  "symbol_id": 1,
+  "items": [
+    {
+      "id": 100,
+      "vendor": {"id": 1, "code": "massive", "name": "Massive / Polygon"},
+      "vendor_api_run_id": 5,
+      "provider_record_id": "AAPL",
+      "provider_ticker": "AAPL",
+      "received_at": "2026-06-07T09:00:00+00:00",
+      "payload": {"ticker": "AAPL"}
+    }
+  ],
+  "limit": 50,
+  "offset": 0,
+  "count": 1
+}
+```
+
+Vendor run list supports `vendor` with default `massive`, optional exact
+`endpoint`, optional `status` limited to `running`, `succeeded`, `failed`, or
+`cancelled`, `limit` default `20` and maximum `100`, and `offset` default `0`.
+Rows are ordered by `started_at DESC, id DESC`.
+
+Vendor run list response shape:
+
+```json
+{
+  "items": [
+    {
+      "id": 5,
+      "vendor": {"id": 1, "code": "massive", "name": "Massive / Polygon"},
+      "endpoint": "/v3/reference/tickers",
+      "status": "succeeded",
+      "started_at": "2026-06-07T09:00:00+00:00",
+      "finished_at": "2026-06-07T09:00:10+00:00",
+      "records_seen": 5,
+      "records_inserted": 5,
+      "records_failed": 0,
+      "error_message": null
+    }
+  ],
+  "limit": 20,
+  "offset": 0,
+  "count": 1
+}
+```
+
+Vendor run detail returns one run plus `request_params` and
+`raw_payload_count`. Missing run ids return:
+
+```json
+{"status":"not_found","error":"vendor run not found"}
+```
+
+The endpoint code is read-only. It uses SQLAlchemy bound parameters, opens the
+database lazily only when an endpoint is called, does not construct a
+Massive/Polygon client, does not require `MASSIVE_API_KEY`, and does not run
+sync, normalization, ingestion, trading, momentum, scheduler, or job execution
+logic. Repository or database failures return compact error JSON and redact a
+secret-bearing `DATABASE_URL`.
+
+Verified commands in this checkout:
+
+```bash
+python3 -m pytest tests/test_api_traceability.py -q
+python3 -m pytest tests/test_api_app.py tests/test_api_symbols.py tests/test_api_symbol_detail.py tests/test_api_traceability.py -q
+python3 -m pytest -q
+python3 - <<'PY'
+from quant_symbols.api.app import app
+print(app.title)
+PY
+```
+
+Observed output:
+
+```text
+11 passed in 0.46s
+35 passed in 0.74s
+138 passed in 0.94s
+quant-symbols-api
+```
+
+Local no-database smoke used this command:
+
+```bash
+python3 -m uvicorn quant_symbols.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Observed endpoint output without `DATABASE_URL`:
+
+```text
+$ curl -fsS 'http://127.0.0.1:8000/health'
+{"status":"ok","service":"quant-symbols-api"}
+
+$ curl -i 'http://127.0.0.1:8000/symbols/1/aliases'
+HTTP/1.1 500 Internal Server Error
+content-type: application/json
+
+{"status":"error","error":"DATABASE_URL is not configured"}
+
+$ curl -i 'http://127.0.0.1:8000/symbols/1/vendor-ids'
+HTTP/1.1 500 Internal Server Error
+content-type: application/json
+
+{"status":"error","error":"DATABASE_URL is not configured"}
+
+$ curl -i 'http://127.0.0.1:8000/symbols/1/raw-payloads?limit=5'
+HTTP/1.1 500 Internal Server Error
+content-type: application/json
+
+{"status":"error","error":"DATABASE_URL is not configured"}
+
+$ curl -i 'http://127.0.0.1:8000/vendor-runs?limit=5'
+HTTP/1.1 500 Internal Server Error
+content-type: application/json
+
+{"status":"error","error":"DATABASE_URL is not configured"}
+
+$ curl -i 'http://127.0.0.1:8000/vendor-runs/1'
+HTTP/1.1 500 Internal Server Error
+content-type: application/json
+
+{"status":"error","error":"DATABASE_URL is not configured"}
+```
+
+Cleanup for the local smoke server was `Ctrl-C` in the Uvicorn terminal. No
+Docker container was started for this slice.
+
+External database verification was not run in this worker because no reachable
+`DATABASE_URL` was supplied. Jar can verify against an externally supplied
+migrated Postgres database with:
+
+```bash
+export DATABASE_URL='postgresql+psycopg://USER:PASSWORD@HOST:5432/DBNAME'
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive --max-pages 1
+python3 -m uvicorn quant_symbols.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Then, from another shell:
+
+```bash
+curl -fsS 'http://127.0.0.1:8000/health'
+curl -fsS 'http://127.0.0.1:8000/ready'
+curl -fsS 'http://127.0.0.1:8000/symbols?q=AAPL&limit=1'
+curl -fsS 'http://127.0.0.1:8000/symbols/by-ticker/AAPL'
+curl -fsS 'http://127.0.0.1:8000/symbols/1/aliases'
+curl -fsS 'http://127.0.0.1:8000/symbols/1/vendor-ids'
+curl -fsS 'http://127.0.0.1:8000/symbols/1/raw-payloads?limit=5'
+curl -fsS 'http://127.0.0.1:8000/vendor-runs?vendor=massive&limit=5'
+curl -fsS 'http://127.0.0.1:8000/vendor-runs/1'
+```
+
+Expected signs are `status=ok` from `/health`, `database=ok` and
+`schema_version=0001_symbol_master_vendor_traceability` from `/ready`,
+traceability rows for fixture-normalized symbols where links exist, bounded raw
+payload results, Massive vendor run metadata, and HTTP 404 for missing vendor
+run ids. `DATABASE_URL` is required for `/ready`, symbol traceability endpoints,
+and vendor run endpoints; it is not required for `/health`.
+
+Postgres compose was not added. `supervisord.conf`, `Dockerfile`, and
+`docker-compose.yml` were not changed in this slice, so the existing persistent
+`quant-symbols-api` supervisord process contract remains in place.
+
+Known limitations: this slice does not add HTTP-triggered jobs, `POST /jobs`,
+auth, frontend work, live Massive calls, or scheduler behavior.
+
 ## Issue 41 Slice 3 Symbol Detail API
 
 The #41 Slice 3 read-only API detail endpoints are implemented in
