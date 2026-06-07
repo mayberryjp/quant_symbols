@@ -53,6 +53,17 @@ KNOWN_MASSIVE_EXCHANGES = {
     "ARCX": "NYSE Arca",
     "BATS": "Cboe BZX Exchange",
     "OTCM": "OTC Markets",
+    "XASE": "NYSE American",
+    "XCHI": "Chicago Stock Exchange",
+    "XPHL": "Nasdaq PHLX",
+    "XBOS": "Nasdaq BX",
+    "XCIS": "NYSE National",
+    "IEXG": "IEX Exchange",
+    "EDGA": "Cboe EDGA Exchange",
+    "EDGX": "Cboe EDGX Exchange",
+    "XNMS": "Nasdaq Global Select",
+    "XNCM": "Nasdaq Capital Market",
+    "XNGS": "Nasdaq Global Market",
 }
 
 

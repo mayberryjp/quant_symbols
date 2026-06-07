@@ -56,6 +56,17 @@ KNOWN_EXCHANGES = {
     "ARCX": "NYSE Arca",
     "BATS": "Cboe BZX Exchange",
     "OTCM": "OTC Markets",
+    "XASE": "NYSE American",
+    "XCHI": "Chicago Stock Exchange",
+    "XPHL": "Nasdaq PHLX",
+    "XBOS": "Nasdaq BX",
+    "XCIS": "NYSE National",
+    "IEXG": "IEX Exchange",
+    "EDGA": "Cboe EDGA Exchange",
+    "EDGX": "Cboe EDGX Exchange",
+    "XNMS": "Nasdaq Global Select",
+    "XNCM": "Nasdaq Capital Market",
+    "XNGS": "Nasdaq Global Market",
 }
 
 
@@ -125,6 +136,22 @@ def _classification(provider_type: str | None, warnings: list[str]) -> tuple[str
         return "equity", "warrant"
     if normalized in {"UNIT"}:
         return "equity", "unit"
+    if normalized in {"PFD"}:
+        return "equity", "preferred"
+    if normalized in {"FUND", "CEF", "OEF"}:
+        return "fund", "fund"
+    if normalized in {"ETS", "ETN", "ETV"}:
+        return "fund", "etn"
+    if normalized in {"SP", "STRUCT"}:
+        return "structured", "structured_product"
+    if normalized in {"OS"}:
+        return "equity", "ordinary_shares"
+    if normalized in {"GDR"}:
+        return "equity", "gdr"
+    if normalized in {"NYR", "NYRS"}:
+        return "equity", "nyr"
+    if normalized in {"LTD", "LP"}:
+        return "equity", "limited_partnership"
     if not normalized:
         warnings.append("missing provider security type mapped to unknown")
         return "other", "unknown"
