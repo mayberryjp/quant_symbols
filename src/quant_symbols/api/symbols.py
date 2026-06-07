@@ -15,6 +15,14 @@ class SymbolListParams:
     offset: int = 0
 
 
+@dataclass(frozen=True)
+class SymbolTickerLookupParams:
+    ticker: str
+    market: str = "stocks"
+    locale: str = "us"
+    active: bool = True
+
+
 def list_symbols(params: SymbolListParams) -> dict[str, Any]:
     from sqlalchemy import create_engine, text
 
@@ -61,6 +69,117 @@ def list_symbols(params: SymbolListParams) -> dict[str, Any]:
         "offset": params.offset,
         "count": len(items),
     }
+
+
+def get_symbol_by_id(symbol_id: int) -> dict[str, Any] | None:
+    from sqlalchemy import create_engine, text
+
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            row = (
+                connection.execute(
+                    text(
+                        """
+                        SELECT
+                            s.id,
+                            s.canonical_ticker,
+                            s.name,
+                            s.market,
+                            s.locale,
+                            s.currency,
+                            s.asset_class,
+                            s.security_type,
+                            s.active,
+                            s.cik,
+                            s.composite_figi,
+                            s.share_class_figi,
+                            s.delisted_at,
+                            e.id AS exchange_id,
+                            e.mic AS exchange_mic,
+                            e.name AS exchange_name
+                        FROM symbol_master.symbols s
+                        LEFT JOIN symbol_master.exchanges e
+                            ON e.id = s.primary_exchange_id
+                        WHERE s.id = :symbol_id
+                        LIMIT 1
+                        """
+                    ),
+                    {"symbol_id": symbol_id},
+                )
+                .mappings()
+                .first()
+            )
+    finally:
+        engine.dispose()
+
+    if row is None:
+        return None
+    return _row_to_detail(row)
+
+
+def get_symbol_by_ticker(params: SymbolTickerLookupParams) -> dict[str, Any] | None:
+    from sqlalchemy import create_engine, text
+
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            row = (
+                connection.execute(
+                    text(
+                        """
+                        SELECT
+                            s.id,
+                            s.canonical_ticker,
+                            s.name,
+                            s.market,
+                            s.locale,
+                            s.currency,
+                            s.asset_class,
+                            s.security_type,
+                            s.active,
+                            s.cik,
+                            s.composite_figi,
+                            s.share_class_figi,
+                            s.delisted_at,
+                            e.id AS exchange_id,
+                            e.mic AS exchange_mic,
+                            e.name AS exchange_name
+                        FROM symbol_master.symbols s
+                        LEFT JOIN symbol_master.exchanges e
+                            ON e.id = s.primary_exchange_id
+                        WHERE lower(s.canonical_ticker) = :ticker
+                            AND s.market = :market
+                            AND s.locale = :locale
+                            AND s.active = :active
+                        ORDER BY s.active DESC, s.id DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {
+                        "ticker": params.ticker.strip().lower(),
+                        "market": params.market,
+                        "locale": params.locale,
+                        "active": params.active,
+                    },
+                )
+                .mappings()
+                .first()
+            )
+    finally:
+        engine.dispose()
+
+    if row is None:
+        return None
+    return _row_to_detail(row)
 
 
 def _where_clause(params: SymbolListParams) -> str:
@@ -127,3 +246,16 @@ def _row_to_item(row: Any) -> dict[str, Any]:
         "active": bool(row["active"]),
         "primary_exchange": primary_exchange,
     }
+
+
+def _row_to_detail(row: Any) -> dict[str, Any]:
+    item = _row_to_item(row)
+    item.update(
+        {
+            "cik": row["cik"],
+            "composite_figi": row["composite_figi"],
+            "share_class_figi": row["share_class_figi"],
+            "delisted_at": row["delisted_at"].isoformat() if row["delisted_at"] else None,
+        }
+    )
+    return item
