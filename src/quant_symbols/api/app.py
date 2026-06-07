@@ -19,6 +19,13 @@ from quant_symbols.api.symbols import (
     get_symbol_by_ticker,
     list_symbols,
 )
+from quant_symbols.api.sync_status import (
+    SyncLatestParams,
+    SyncRunListParams,
+    get_latest_sync_run,
+    get_sync_run,
+    list_sync_runs,
+)
 from quant_symbols.api.traceability import (
     RawPayloadListParams,
     VendorRunListParams,
@@ -42,6 +49,9 @@ SymbolVendorIds = Callable[[int], Optional[Dict[str, Any]]]
 SymbolRawPayloads = Callable[[RawPayloadListParams], Optional[Dict[str, Any]]]
 VendorRuns = Callable[[VendorRunListParams], Dict[str, Any]]
 VendorRunDetail = Callable[[int], Optional[Dict[str, Any]]]
+SyncLatest = Callable[[SyncLatestParams], Optional[Dict[str, Any]]]
+SyncRuns = Callable[[SyncRunListParams], Dict[str, Any]]
+SyncRunDetail = Callable[[int], Optional[Dict[str, Any]]]
 
 
 def _status_payload(status: Union[ReadinessStatus, Dict[str, Any]]) -> Dict[str, Any]:
@@ -60,6 +70,9 @@ def create_app(
     symbol_raw_payloads: SymbolRawPayloads = list_symbol_raw_payloads,
     vendor_runs: VendorRuns = list_vendor_runs,
     vendor_run_detail: VendorRunDetail = get_vendor_run,
+    sync_latest: SyncLatest = get_latest_sync_run,
+    sync_runs: SyncRuns = list_sync_runs,
+    sync_run_detail: SyncRunDetail = get_sync_run,
 ) -> FastAPI:
     api = FastAPI(title=SERVICE_NAME)
 
@@ -175,6 +188,50 @@ def create_app(
             return _server_error(exc)
         if result is None:
             return _not_found("vendor run not found")
+        return result
+
+    @api.get("/sync/latest")
+    def sync_latest_route(
+        vendor: str = "massive",
+        endpoint: str = "/v3/reference/tickers",
+    ):
+        params = SyncLatestParams(vendor=vendor, endpoint=endpoint)
+        try:
+            result = sync_latest(params)
+        except Exception as exc:
+            return _server_error(exc)
+        if result is None:
+            return _not_found("sync run not found")
+        return {"status": "ok", "latest": result}
+
+    @api.get("/sync/runs")
+    def sync_runs_route(
+        vendor: str = "massive",
+        endpoint: str = "/v3/reference/tickers",
+        status: Optional[VendorRunStatus] = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ):
+        params = SyncRunListParams(
+            vendor=vendor,
+            endpoint=endpoint,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+        try:
+            return sync_runs(params)
+        except Exception as exc:
+            return _server_error(exc)
+
+    @api.get("/sync/runs/{run_id}")
+    def sync_run_detail_route(run_id: int):
+        try:
+            result = sync_run_detail(run_id)
+        except Exception as exc:
+            return _server_error(exc)
+        if result is None:
+            return _not_found("sync run not found")
         return result
 
     @api.get("/symbols")
