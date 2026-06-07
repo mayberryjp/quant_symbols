@@ -16,8 +16,6 @@ RUN python3 -m pip install --upgrade pip \
     && python3 -m pip install -e ".[dev]" \
     && python3 -m pip install supervisor
 
-COPY supervisord.conf /etc/supervisor/supervisord.conf
-
 ENV SYNC_INTERVAL=86400
 
-CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+CMD ["supervisord", "-c", "/app/supervisord.conf"]
