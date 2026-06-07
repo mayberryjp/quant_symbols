@@ -560,6 +560,145 @@ python3 -m pytest -q
 Cleanup after optional Docker validation is `docker compose down`, or
 `docker compose down -v` if the local Postgres volume should be deleted.
 
+## Issue 41 Slice 2 Read-Only Symbol List API
+
+The #41 Slice 2 API list endpoint is implemented by
+`src/quant_symbols/api/app.py` and `src/quant_symbols/api/symbols.py`.
+
+`GET /symbols` reads normalized rows from `symbol_master.symbols` with a left
+join to `symbol_master.exchanges` for the primary exchange object. The endpoint
+returns only normalized symbol fields:
+
+- `id`
+- `canonical_ticker`
+- `name`
+- `market`
+- `locale`
+- `currency`
+- `asset_class`
+- `security_type`
+- `active`
+- `primary_exchange`, either an object with `id`, `mic`, and `name`, or `null`
+
+It does not include raw vendor payloads, vendor API runs, vendor IDs, aliases,
+Massive-specific response fields, or any job execution behavior.
+
+Supported query parameters are:
+
+- `active`, optional FastAPI boolean
+- `market`, optional exact match
+- `locale`, optional exact match
+- `q`, optional case-insensitive search over canonical ticker and name
+- `limit`, default `100`, minimum `1`, maximum `500`
+- `offset`, default `0`, minimum `0`
+
+Rows are ordered by `canonical_ticker ASC, id ASC`. The SQL query uses
+SQLAlchemy bound parameters and opens a database connection only when
+`GET /symbols` is called. API import and `/health` do not connect to the
+database.
+
+Example response shape from an injected test repository:
+
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "canonical_ticker": "AAPL",
+      "name": "Apple Inc.",
+      "market": "stocks",
+      "locale": "us",
+      "currency": "USD",
+      "asset_class": "equity",
+      "security_type": "common_stock",
+      "active": true,
+      "primary_exchange": {
+        "id": 2,
+        "mic": "XNAS",
+        "name": "Nasdaq Stock Market"
+      }
+    }
+  ],
+  "limit": 100,
+  "offset": 0,
+  "count": 1
+}
+```
+
+Empty result behavior is stable:
+
+```json
+{"items":[],"limit":5,"offset":0,"count":0}
+```
+
+With no `DATABASE_URL` configured, local Uvicorn smoke validation observed:
+
+```bash
+python3 -m uvicorn quant_symbols.api.app:app --host 127.0.0.1 --port 8000
+curl -fsS 'http://127.0.0.1:8000/health'
+curl -i 'http://127.0.0.1:8000/symbols?limit=5'
+```
+
+Observed output:
+
+```text
+{"status":"ok","service":"quant-symbols-api"}
+HTTP/1.1 500 Internal Server Error
+content-type: application/json
+
+{"status":"error","error":"DATABASE_URL is not configured"}
+```
+
+Cleanup for that smoke process was `Ctrl+C` in the Uvicorn terminal.
+
+Verified commands:
+
+```bash
+python3 -m pytest tests/test_api_symbols.py -q
+python3 -m pytest tests/test_api_app.py tests/test_api_symbols.py -q
+python3 -m pytest -q
+python3 - <<'PY'
+from quant_symbols.api.app import app
+print(app.title)
+PY
+```
+
+Observed output:
+
+```text
+8 passed in 0.35s
+13 passed in 0.36s
+116 passed in 0.49s
+quant-symbols-api
+```
+
+Jar can verify against an externally supplied migrated Postgres database with:
+
+```bash
+export DATABASE_URL='postgresql+psycopg://USER:PASSWORD@HOST:5432/DBNAME'
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive --max-pages 1
+python3 -m uvicorn quant_symbols.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Then from another shell:
+
+```bash
+curl -fsS 'http://127.0.0.1:8000/health'
+curl -fsS 'http://127.0.0.1:8000/ready'
+curl -fsS 'http://127.0.0.1:8000/symbols?active=true&market=stocks&locale=us&limit=10'
+curl -fsS 'http://127.0.0.1:8000/symbols?q=AAPL&limit=5'
+```
+
+This worker did not run DB-backed endpoint verification because no external
+Postgres `DATABASE_URL` was supplied. Docker smoke validation was not run for
+this slice. `supervisord.conf` was not changed; the persistent API program
+remains `quant-symbols-api`.
+
+Known limitations for this slice: symbol detail, by-ticker lookup, aliases,
+vendor IDs, raw payloads, vendor runs, and operator status endpoints remain
+future slices.
+
 ## Issue 41 Slice 1 API Runtime Foundation
 
 The #41 Slice 1 backend API foundation is implemented under
