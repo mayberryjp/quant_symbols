@@ -12,13 +12,21 @@ from quant_symbols.api.readiness import (
     check_database_readiness,
     sanitize_readiness_error,
 )
-from quant_symbols.api.symbols import SymbolListParams, list_symbols
+from quant_symbols.api.symbols import (
+    SymbolListParams,
+    SymbolTickerLookupParams,
+    get_symbol_by_id,
+    get_symbol_by_ticker,
+    list_symbols,
+)
 
 SERVICE_NAME = "quant-symbols-api"
 
 
 ReadinessCheck = Callable[[], Union[ReadinessStatus, Dict[str, Any]]]
 SymbolList = Callable[[SymbolListParams], Dict[str, Any]]
+SymbolDetail = Callable[[int], Optional[Dict[str, Any]]]
+SymbolByTicker = Callable[[SymbolTickerLookupParams], Optional[Dict[str, Any]]]
 
 
 def _status_payload(status: Union[ReadinessStatus, Dict[str, Any]]) -> Dict[str, Any]:
@@ -30,6 +38,8 @@ def _status_payload(status: Union[ReadinessStatus, Dict[str, Any]]) -> Dict[str,
 def create_app(
     readiness_check: ReadinessCheck = check_database_readiness,
     symbol_list: SymbolList = list_symbols,
+    symbol_detail: SymbolDetail = get_symbol_by_id,
+    symbol_by_ticker: SymbolByTicker = get_symbol_by_ticker,
 ) -> FastAPI:
     api = FastAPI(title=SERVICE_NAME)
 
@@ -51,6 +61,37 @@ def create_app(
                 },
             )
 
+    @api.get("/symbols/by-ticker/{ticker}")
+    def symbol_by_ticker_route(
+        ticker: str,
+        market: str = "stocks",
+        locale: str = "us",
+        active: bool = True,
+    ):
+        params = SymbolTickerLookupParams(
+            ticker=ticker,
+            market=market,
+            locale=locale,
+            active=active,
+        )
+        try:
+            symbol = symbol_by_ticker(params)
+        except Exception as exc:
+            return _server_error(exc)
+        if symbol is None:
+            return _not_found()
+        return symbol
+
+    @api.get("/symbols/{symbol_id}")
+    def symbol_detail_route(symbol_id: int):
+        try:
+            symbol = symbol_detail(symbol_id)
+        except Exception as exc:
+            return _server_error(exc)
+        if symbol is None:
+            return _not_found()
+        return symbol
+
     @api.get("/symbols")
     def symbols(
         active: Optional[bool] = None,
@@ -71,15 +112,26 @@ def create_app(
         try:
             return symbol_list(params)
         except Exception as exc:
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "status": "error",
-                    "error": sanitize_readiness_error(exc, os.environ.get("DATABASE_URL")),
-                },
-            )
+            return _server_error(exc)
 
     return api
+
+
+def _not_found() -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={"status": "not_found", "error": "symbol not found"},
+    )
+
+
+def _server_error(exc: Exception) -> JSONResponse:
+    return JSONResponse(
+        status_code=500,
+        content={
+            "status": "error",
+            "error": sanitize_readiness_error(exc, os.environ.get("DATABASE_URL")),
+        },
+    )
 
 
 app = create_app()

@@ -560,6 +560,156 @@ python3 -m pytest -q
 Cleanup after optional Docker validation is `docker compose down`, or
 `docker compose down -v` if the local Postgres volume should be deleted.
 
+## Issue 41 Slice 3 Symbol Detail API
+
+The #41 Slice 3 read-only API detail endpoints are implemented in
+`src/quant_symbols/api/app.py` and `src/quant_symbols/api/symbols.py`.
+
+Endpoints:
+
+- `GET /symbols/{symbol_id}`
+- `GET /symbols/by-ticker/{ticker}?market=stocks&locale=us&active=true`
+
+`GET /symbols/{symbol_id}` uses an integer path parameter and looks up
+`symbol_master.symbols.id` exactly. Invalid path values such as
+`/symbols/not-an-int` return FastAPI validation errors before the lookup
+callable is invoked.
+
+`GET /symbols/by-ticker/{ticker}` performs a case-insensitive lookup against
+`canonical_ticker`. The default filters are `market=stocks`, `locale=us`, and
+`active=true`. Explicit query parameters override those defaults. If multiple
+rows match the by-ticker filters, the database query orders by `active DESC,
+id DESC` and returns one row.
+
+Both endpoints return normalized symbol fields only:
+
+```json
+{
+  "id": 1,
+  "canonical_ticker": "AAPL",
+  "name": "Apple Inc.",
+  "market": "stocks",
+  "locale": "us",
+  "currency": "USD",
+  "asset_class": "equity",
+  "security_type": "common_stock",
+  "active": true,
+  "cik": "0000320193",
+  "composite_figi": "BBG000B9XRY4",
+  "share_class_figi": "BBG001S5N8V8",
+  "delisted_at": null,
+  "primary_exchange": {
+    "id": 2,
+    "mic": "XNAS",
+    "name": "Nasdaq Stock Market"
+  }
+}
+```
+
+When no primary exchange is present, `primary_exchange` is `null`. Missing
+records return:
+
+```json
+{"status":"not_found","error":"symbol not found"}
+```
+
+Repository or database failures return compact error JSON and redact a
+secret-bearing `DATABASE_URL`. The endpoint code is read-only: it does not call
+Massive/Polygon, construct a Massive client, run sync, run normalization, write
+database rows, expose aliases, expose vendor IDs, expose raw payloads, or expose
+vendor runs.
+
+The API module still avoids import-time database access. SQLAlchemy imports and
+engine creation happen inside repository functions when an endpoint calls them.
+`create_app()` accepts injectable `symbol_detail` and `symbol_by_ticker`
+callables so normal tests can run without live Postgres.
+
+Verified commands in this checkout:
+
+```bash
+python3 -m pytest tests/test_api_symbol_detail.py -q
+python3 -m pytest tests/test_api_app.py tests/test_api_symbols.py tests/test_api_symbol_detail.py -q
+python3 -m pytest -q
+python3 - <<'PY'
+from quant_symbols.api.app import app
+print(app.title)
+PY
+```
+
+Observed output:
+
+```text
+11 passed in 0.42s
+24 passed in 0.52s
+127 passed in 0.71s
+quant-symbols-api
+```
+
+Local no-database smoke used this command:
+
+```bash
+python3 -m uvicorn quant_symbols.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Observed endpoint output without `DATABASE_URL`:
+
+```text
+$ curl -fsS 'http://127.0.0.1:8000/health'
+{"status":"ok","service":"quant-symbols-api"}
+
+$ curl -i 'http://127.0.0.1:8000/symbols/1'
+HTTP/1.1 500 Internal Server Error
+content-type: application/json
+
+{"status":"error","error":"DATABASE_URL is not configured"}
+
+$ curl -i 'http://127.0.0.1:8000/symbols/by-ticker/AAPL'
+HTTP/1.1 500 Internal Server Error
+content-type: application/json
+
+{"status":"error","error":"DATABASE_URL is not configured"}
+```
+
+Cleanup for the local smoke server was `Ctrl-C` in the Uvicorn terminal. No
+Docker container was started for this slice.
+
+External database verification was not run in this worker because no reachable
+`DATABASE_URL` was supplied. Jar can verify against an externally supplied
+migrated Postgres database with:
+
+```bash
+export DATABASE_URL='postgresql+psycopg://USER:PASSWORD@HOST:5432/DBNAME'
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli symbols sync --fixture tests/fixtures/massive --max-pages 1
+python3 -m uvicorn quant_symbols.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Then, from another shell:
+
+```bash
+curl -fsS 'http://127.0.0.1:8000/health'
+curl -fsS 'http://127.0.0.1:8000/ready'
+curl -fsS 'http://127.0.0.1:8000/symbols?q=AAPL&limit=1'
+curl -fsS 'http://127.0.0.1:8000/symbols/by-ticker/AAPL'
+curl -i 'http://127.0.0.1:8000/symbols/1'
+curl -i 'http://127.0.0.1:8000/symbols/999999999'
+```
+
+Expected signs are `status=ok` from `/health`, `database=ok` and
+`schema_version=0001_symbol_master_vendor_traceability` from `/ready`, a
+normalized AAPL record from the by-ticker endpoint after fixture sync, and HTTP
+404 for missing ids. `DATABASE_URL` is required for `/ready`, `/symbols`,
+`/symbols/{symbol_id}`, and `/symbols/by-ticker/{ticker}` database-backed
+success; it is not required for `/health`.
+
+Postgres compose was not added. `supervisord.conf`, `Dockerfile`, and
+`docker-compose.yml` were not changed in this slice, so the existing persistent
+`quant-symbols-api` supervisord process contract remains in place.
+
+Known limitations: this slice does not add aliases, vendor IDs, raw payloads,
+vendor runs, operator status endpoints, auth, frontend work, HTTP-triggered
+jobs, live Massive calls, or scheduler behavior.
+
 ## Issue 41 Slice 2 Read-Only Symbol List API
 
 The #41 Slice 2 API list endpoint is implemented by
