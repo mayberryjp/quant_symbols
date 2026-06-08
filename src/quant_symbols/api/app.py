@@ -81,18 +81,6 @@ def create_app(
 ) -> FastAPI:
     api = FastAPI(title=SERVICE_NAME)
 
-    @api.on_event("startup")
-    def _configure_logging() -> None:
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s %(levelname)s %(name)s: %(message)s"
-        ))
-        root = logging.getLogger()
-        root.handlers.clear()
-        root.addHandler(handler)
-        root.setLevel(logging.INFO)
-        log.setLevel(logging.INFO)
-
     @api.middleware("http")
     async def log_requests(request: Request, call_next):
         start = time.perf_counter()
@@ -316,5 +304,12 @@ def _server_error(exc: Exception) -> JSONResponse:
         },
     )
 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    stream=sys.stderr,
+    force=True,
+)
 
 app = create_app()

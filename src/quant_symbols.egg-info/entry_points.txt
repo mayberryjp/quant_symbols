@@ -1,0 +1,2 @@
+[console_scripts]
+quant-symbols-massive = quant_symbols.vendors.massive.cli:main
