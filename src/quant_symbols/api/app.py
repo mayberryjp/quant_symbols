@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
+import time
 from typing import Any, Callable, Dict, Optional, Union
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 from typing_extensions import Annotated
 
@@ -38,6 +40,8 @@ from quant_symbols.api.traceability import (
 )
 
 SERVICE_NAME = "quant-symbols-api"
+
+log = logging.getLogger(SERVICE_NAME)
 
 
 ReadinessCheck = Callable[[], Union[ReadinessStatus, Dict[str, Any]]]
@@ -75,6 +79,29 @@ def create_app(
     sync_run_detail: SyncRunDetail = get_sync_run,
 ) -> FastAPI:
     api = FastAPI(title=SERVICE_NAME)
+
+    @api.middleware("http")
+    async def log_requests(request: Request, call_next):
+        start = time.perf_counter()
+        method = request.method
+        path = request.url.path
+        query = str(request.url.query)
+        log.info("request_start method=%s path=%s query=%s", method, path, query)
+        try:
+            response = await call_next(request)
+        except Exception:
+            duration_ms = (time.perf_counter() - start) * 1000
+            log.exception(
+                "request_error method=%s path=%s duration_ms=%.1f",
+                method, path, duration_ms,
+            )
+            raise
+        duration_ms = (time.perf_counter() - start) * 1000
+        log.info(
+            "request_end method=%s path=%s status=%d duration_ms=%.1f",
+            method, path, response.status_code, duration_ms,
+        )
+        return response
 
     @api.get("/health")
     def health() -> Dict[str, str]:
@@ -267,6 +294,7 @@ def _not_found(error: str = "symbol not found") -> JSONResponse:
 
 
 def _server_error(exc: Exception) -> JSONResponse:
+    log.exception("handler_error: %s", exc)
     return JSONResponse(
         status_code=500,
         content={
@@ -276,4 +304,8 @@ def _server_error(exc: Exception) -> JSONResponse:
     )
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 app = create_app()
