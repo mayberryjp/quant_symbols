@@ -10,7 +10,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends bash ca-certificates git vim \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/mayberryjp/quant_symbols.git .
+COPY . .
 
 RUN python3 -m pip install --upgrade pip \
     && python3 -m pip install -e ".[dev]" \
