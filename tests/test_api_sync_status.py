@@ -4,7 +4,7 @@ import builtins
 import importlib
 import sys
 
-from fastapi.testclient import TestClient
+from quant_symbols.api.testing import TestClient
 
 from quant_symbols.api.app import create_app
 from quant_symbols.api.sync_status import SyncLatestParams, SyncRunListParams

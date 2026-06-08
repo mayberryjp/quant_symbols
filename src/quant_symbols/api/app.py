@@ -6,9 +6,7 @@ import sys
 import time
 from typing import Any, Callable, Dict, Optional, Union
 
-from fastapi import FastAPI, Query, Request
-from fastapi.responses import JSONResponse
-from typing_extensions import Annotated
+from bottle import Bottle, request, response
 
 from quant_symbols.api.readiness import (
     ReadinessStatus,
@@ -58,12 +56,82 @@ SyncLatest = Callable[[SyncLatestParams], Optional[Dict[str, Any]]]
 SyncRuns = Callable[[SyncRunListParams], Dict[str, Any]]
 SyncRunDetail = Callable[[int], Optional[Dict[str, Any]]]
 
+VALID_RUN_STATUSES = frozenset(("running", "succeeded", "failed", "cancelled"))
+
+
+# ---------------------------------------------------------------------------
+# Query-parameter helpers
+# ---------------------------------------------------------------------------
+
+class _ValidationError(Exception):
+    pass
+
+
+def _int_param(raw: str | None, *, default: int, ge: int | None = None, le: int | None = None) -> int:
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except (ValueError, TypeError):
+        raise _ValidationError("invalid integer parameter")
+    if ge is not None and value < ge:
+        raise _ValidationError(f"value must be >= {ge}")
+    if le is not None and value > le:
+        raise _ValidationError(f"value must be <= {le}")
+    return value
+
+
+def _bool_param(raw: str | None, *, default: bool | None = None) -> bool | None:
+    if raw is None or raw == "":
+        return default
+    lower = raw.lower()
+    if lower in ("true", "1", "yes"):
+        return True
+    if lower in ("false", "0", "no"):
+        return False
+    return default
+
+
+def _status_param(raw: str | None) -> str | None:
+    if raw is None or raw == "":
+        return None
+    if raw not in VALID_RUN_STATUSES:
+        raise _ValidationError(f"status must be one of {sorted(VALID_RUN_STATUSES)}")
+    return raw
+
+
+# ---------------------------------------------------------------------------
+# Response helpers
+# ---------------------------------------------------------------------------
 
 def _status_payload(status: Union[ReadinessStatus, Dict[str, Any]]) -> Dict[str, Any]:
     if isinstance(status, ReadinessStatus):
         return status.as_json()
     return {"status": "ok", **status}
 
+
+def _not_found(error: str = "symbol not found") -> dict:
+    response.status = 404
+    return {"status": "not_found", "error": error}
+
+
+def _server_error(exc: Exception) -> dict:
+    log.exception("handler_error: %s", exc)
+    response.status = 500
+    return {
+        "status": "error",
+        "error": sanitize_readiness_error(exc, os.environ.get("DATABASE_URL")),
+    }
+
+
+def _validation_error_response(detail: str = "validation error") -> dict:
+    response.status = 422
+    return {"detail": detail}
+
+
+# ---------------------------------------------------------------------------
+# Application factory
+# ---------------------------------------------------------------------------
 
 def create_app(
     readiness_check: ReadinessCheck = check_database_readiness,
@@ -78,61 +146,57 @@ def create_app(
     sync_latest: SyncLatest = get_latest_sync_run,
     sync_runs: SyncRuns = list_sync_runs,
     sync_run_detail: SyncRunDetail = get_sync_run,
-) -> FastAPI:
-    api = FastAPI(title=SERVICE_NAME)
+) -> Bottle:
+    api = Bottle()
+    api.title = SERVICE_NAME
 
-    @api.middleware("http")
-    async def log_requests(request: Request, call_next):
-        start = time.perf_counter()
-        method = request.method
-        path = request.url.path
-        query = str(request.url.query)
-        log.info("request_start method=%s path=%s query=%s", method, path, query)
-        try:
-            response = await call_next(request)
-        except Exception:
-            duration_ms = (time.perf_counter() - start) * 1000
-            log.exception(
-                "request_error method=%s path=%s duration_ms=%.1f",
-                method, path, duration_ms,
-            )
-            raise
-        duration_ms = (time.perf_counter() - start) * 1000
+    # -- request logging hooks ------------------------------------------
+
+    @api.hook("before_request")
+    def _log_before() -> None:
+        request._log_start = time.perf_counter()  # type: ignore[attr-defined]
         log.info(
-            "request_end method=%s path=%s status=%d duration_ms=%.1f",
-            method, path, response.status_code, duration_ms,
+            "request_start method=%s path=%s query=%s",
+            request.method, request.path, request.query_string,
         )
-        return response
+
+    @api.hook("after_request")
+    def _log_after() -> None:
+        start = getattr(request, "_log_start", None)
+        if start is not None:
+            duration_ms = (time.perf_counter() - start) * 1000
+            log.info(
+                "request_end method=%s path=%s status=%d duration_ms=%.1f",
+                request.method, request.path, response.status_code, duration_ms,
+            )
+
+    # -- health / readiness ---------------------------------------------
 
     @api.get("/health")
-    def health() -> Dict[str, str]:
+    def health() -> dict:
         return {"status": "ok", "service": SERVICE_NAME}
 
     @api.get("/ready")
-    def ready():
+    def ready() -> dict:
         try:
             return _status_payload(readiness_check())
         except Exception as exc:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "status": "not_ready",
-                    "database": "error",
-                    "error": sanitize_readiness_error(exc, os.environ.get("DATABASE_URL")),
-                },
-            )
+            response.status = 503
+            return {
+                "status": "not_ready",
+                "database": "error",
+                "error": sanitize_readiness_error(exc, os.environ.get("DATABASE_URL")),
+            }
 
-    @api.get("/symbols/by-ticker/{ticker}")
-    def symbol_by_ticker_route(
-        ticker: str,
-        market: str = "stocks",
-        locale: str = "us",
-        active: bool = True,
-    ):
+    # -- symbol by ticker -----------------------------------------------
+
+    @api.get("/symbols/by-ticker/<ticker>")
+    def symbol_by_ticker_route(ticker: str) -> dict:
+        active = _bool_param(request.query.get("active"), default=True)
         params = SymbolTickerLookupParams(
             ticker=ticker,
-            market=market,
-            locale=locale,
+            market=request.query.get("market", "stocks"),
+            locale=request.query.get("locale", "us"),
             active=active,
         )
         try:
@@ -143,33 +207,48 @@ def create_app(
             return _not_found()
         return symbol
 
-    @api.get("/symbols/{symbol_id}/aliases")
-    def symbol_aliases_route(symbol_id: int):
+    # -- symbol sub-resources (must precede /symbols/<symbol_id>) -------
+
+    @api.get("/symbols/<symbol_id>/aliases")
+    def symbol_aliases_route(symbol_id: str) -> dict:
         try:
-            result = symbol_aliases(symbol_id)
+            sid = int(symbol_id)
+        except (ValueError, TypeError):
+            return _validation_error_response("symbol_id must be an integer")
+        try:
+            result = symbol_aliases(sid)
         except Exception as exc:
             return _server_error(exc)
         if result is None:
             return _not_found()
         return result
 
-    @api.get("/symbols/{symbol_id}/vendor-ids")
-    def symbol_vendor_ids_route(symbol_id: int):
+    @api.get("/symbols/<symbol_id>/vendor-ids")
+    def symbol_vendor_ids_route(symbol_id: str) -> dict:
         try:
-            result = symbol_vendor_ids(symbol_id)
+            sid = int(symbol_id)
+        except (ValueError, TypeError):
+            return _validation_error_response("symbol_id must be an integer")
+        try:
+            result = symbol_vendor_ids(sid)
         except Exception as exc:
             return _server_error(exc)
         if result is None:
             return _not_found()
         return result
 
-    @api.get("/symbols/{symbol_id}/raw-payloads")
-    def symbol_raw_payloads_route(
-        symbol_id: int,
-        limit: Annotated[int, Query(ge=1, le=100)] = 50,
-        offset: Annotated[int, Query(ge=0)] = 0,
-    ):
-        params = RawPayloadListParams(symbol_id=symbol_id, limit=limit, offset=offset)
+    @api.get("/symbols/<symbol_id>/raw-payloads")
+    def symbol_raw_payloads_route(symbol_id: str) -> dict:
+        try:
+            sid = int(symbol_id)
+        except (ValueError, TypeError):
+            return _validation_error_response("symbol_id must be an integer")
+        try:
+            limit = _int_param(request.query.get("limit"), default=50, ge=1, le=100)
+            offset = _int_param(request.query.get("offset"), default=0, ge=0)
+        except _ValidationError:
+            return _validation_error_response()
+        params = RawPayloadListParams(symbol_id=sid, limit=limit, offset=offset)
         try:
             result = symbol_raw_payloads(params)
         except Exception as exc:
@@ -178,27 +257,49 @@ def create_app(
             return _not_found()
         return result
 
-    @api.get("/symbols/{symbol_id}")
-    def symbol_detail_route(symbol_id: int):
+    # -- symbol detail ---------------------------------------------------
+
+    @api.get("/symbols/<symbol_id>")
+    def symbol_detail_route(symbol_id: str) -> dict:
         try:
-            symbol = symbol_detail(symbol_id)
+            sid = int(symbol_id)
+        except (ValueError, TypeError):
+            return _validation_error_response("symbol_id must be an integer")
+        try:
+            symbol = symbol_detail(sid)
         except Exception as exc:
             return _server_error(exc)
         if symbol is None:
             return _not_found()
         return symbol
 
+    # -- vendor runs -----------------------------------------------------
+
+    @api.get("/vendor-runs/<run_id>")
+    def vendor_run_detail_route(run_id: str) -> dict:
+        try:
+            rid = int(run_id)
+        except (ValueError, TypeError):
+            return _validation_error_response("run_id must be an integer")
+        try:
+            result = vendor_run_detail(rid)
+        except Exception as exc:
+            return _server_error(exc)
+        if result is None:
+            return _not_found("vendor run not found")
+        return result
+
     @api.get("/vendor-runs")
-    def vendor_runs_route(
-        vendor: str = "massive",
-        endpoint: Optional[str] = None,
-        status: Optional[VendorRunStatus] = None,
-        limit: Annotated[int, Query(ge=1, le=100)] = 20,
-        offset: Annotated[int, Query(ge=0)] = 0,
-    ):
+    def vendor_runs_route() -> dict:
+        try:
+            status = _status_param(request.query.get("status"))
+            limit = _int_param(request.query.get("limit"), default=20, ge=1, le=100)
+            offset = _int_param(request.query.get("offset"), default=0, ge=0)
+        except _ValidationError:
+            return _validation_error_response()
         params = VendorRunListParams(
-            vendor=vendor,
-            endpoint=endpoint,
+            vendor=request.query.get("vendor", "massive"),
+            endpoint=request.query.get("endpoint") or None,
             status=status,
             limit=limit,
             offset=offset,
@@ -208,22 +309,14 @@ def create_app(
         except Exception as exc:
             return _server_error(exc)
 
-    @api.get("/vendor-runs/{run_id}")
-    def vendor_run_detail_route(run_id: int):
-        try:
-            result = vendor_run_detail(run_id)
-        except Exception as exc:
-            return _server_error(exc)
-        if result is None:
-            return _not_found("vendor run not found")
-        return result
+    # -- sync ------------------------------------------------------------
 
     @api.get("/sync/latest")
-    def sync_latest_route(
-        vendor: str = "massive",
-        endpoint: str = "/v3/reference/tickers",
-    ):
-        params = SyncLatestParams(vendor=vendor, endpoint=endpoint)
+    def sync_latest_route() -> dict:
+        params = SyncLatestParams(
+            vendor=request.query.get("vendor", "massive"),
+            endpoint=request.query.get("endpoint", "/v3/reference/tickers"),
+        )
         try:
             result = sync_latest(params)
         except Exception as exc:
@@ -232,17 +325,31 @@ def create_app(
             return _not_found("sync run not found")
         return {"status": "ok", "latest": result}
 
+    @api.get("/sync/runs/<run_id>")
+    def sync_run_detail_route(run_id: str) -> dict:
+        try:
+            rid = int(run_id)
+        except (ValueError, TypeError):
+            return _validation_error_response("run_id must be an integer")
+        try:
+            result = sync_run_detail(rid)
+        except Exception as exc:
+            return _server_error(exc)
+        if result is None:
+            return _not_found("sync run not found")
+        return result
+
     @api.get("/sync/runs")
-    def sync_runs_route(
-        vendor: str = "massive",
-        endpoint: str = "/v3/reference/tickers",
-        status: Optional[VendorRunStatus] = None,
-        limit: Annotated[int, Query(ge=1, le=100)] = 20,
-        offset: Annotated[int, Query(ge=0)] = 0,
-    ):
+    def sync_runs_route() -> dict:
+        try:
+            status = _status_param(request.query.get("status"))
+            limit = _int_param(request.query.get("limit"), default=20, ge=1, le=100)
+            offset = _int_param(request.query.get("offset"), default=0, ge=0)
+        except _ValidationError:
+            return _validation_error_response()
         params = SyncRunListParams(
-            vendor=vendor,
-            endpoint=endpoint,
+            vendor=request.query.get("vendor", "massive"),
+            endpoint=request.query.get("endpoint", "/v3/reference/tickers"),
             status=status,
             limit=limit,
             offset=offset,
@@ -252,30 +359,23 @@ def create_app(
         except Exception as exc:
             return _server_error(exc)
 
-    @api.get("/sync/runs/{run_id}")
-    def sync_run_detail_route(run_id: int):
-        try:
-            result = sync_run_detail(run_id)
-        except Exception as exc:
-            return _server_error(exc)
-        if result is None:
-            return _not_found("sync run not found")
-        return result
+    # -- symbol list (broadest match, defined last) ----------------------
 
     @api.get("/symbols")
-    def symbols(
-        active: Optional[bool] = None,
-        market: Optional[str] = None,
-        locale: Optional[str] = None,
-        q: Optional[str] = None,
-        limit: Annotated[int, Query(ge=1, le=500)] = 100,
-        offset: Annotated[int, Query(ge=0)] = 0,
-    ):
+    def symbols() -> dict:
+        try:
+            limit = _int_param(request.query.get("limit"), default=100, ge=1, le=500)
+            offset = _int_param(request.query.get("offset"), default=0, ge=0)
+        except _ValidationError:
+            return _validation_error_response()
+        active = _bool_param(request.query.get("active"))
+        raw_q = request.query.get("q")
+        q = raw_q.strip() if raw_q and raw_q.strip() else None
         params = SymbolListParams(
             active=active,
-            market=market,
-            locale=locale,
-            q=q.strip() if q and q.strip() else None,
+            market=request.query.get("market") or None,
+            locale=request.query.get("locale") or None,
+            q=q,
             limit=limit,
             offset=offset,
         )
@@ -287,23 +387,9 @@ def create_app(
     return api
 
 
-def _not_found(error: str = "symbol not found") -> JSONResponse:
-    return JSONResponse(
-        status_code=404,
-        content={"status": "not_found", "error": error},
-    )
-
-
-def _server_error(exc: Exception) -> JSONResponse:
-    log.exception("handler_error: %s", exc)
-    return JSONResponse(
-        status_code=500,
-        content={
-            "status": "error",
-            "error": sanitize_readiness_error(exc, os.environ.get("DATABASE_URL")),
-        },
-    )
-
+# ---------------------------------------------------------------------------
+# Module-level setup
+# ---------------------------------------------------------------------------
 
 logging.basicConfig(
     level=logging.INFO,
@@ -311,11 +397,6 @@ logging.basicConfig(
     stream=sys.stderr,
     force=True,
 )
-# Also push uvicorn's own loggers through the same handler so everything
-# appears in Docker's combined stdout/stderr stream.
-for _uv_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-    logging.getLogger(_uv_name).handlers.clear()
-    logging.getLogger(_uv_name).propagate = True
 
 print(
     f"[{SERVICE_NAME}] module={__file__} python={sys.executable} "
@@ -325,13 +406,3 @@ print(
 )
 
 app = create_app()
-
-# Emit registered routes so docker logs proves the app loaded the right code.
-_route_paths = sorted(
-    r.path for r in app.routes if hasattr(r, "methods")
-)
-print(
-    f"[{SERVICE_NAME}] routes({len(_route_paths)}): {_route_paths}",
-    file=sys.stderr,
-    flush=True,
-)
