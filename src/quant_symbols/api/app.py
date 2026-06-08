@@ -311,5 +311,27 @@ logging.basicConfig(
     stream=sys.stderr,
     force=True,
 )
+# Also push uvicorn's own loggers through the same handler so everything
+# appears in Docker's combined stdout/stderr stream.
+for _uv_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    logging.getLogger(_uv_name).handlers.clear()
+    logging.getLogger(_uv_name).propagate = True
+
+print(
+    f"[{SERVICE_NAME}] module={__file__} python={sys.executable} "
+    f"version={sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+    file=sys.stderr,
+    flush=True,
+)
 
 app = create_app()
+
+# Emit registered routes so docker logs proves the app loaded the right code.
+_route_paths = sorted(
+    r.path for r in app.routes if hasattr(r, "methods")
+)
+print(
+    f"[{SERVICE_NAME}] routes({len(_route_paths)}): {_route_paths}",
+    file=sys.stderr,
+    flush=True,
+)
