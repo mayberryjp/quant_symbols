@@ -406,3 +406,12 @@ print(
 )
 
 app = create_app()
+
+
+if __name__ == "__main__":
+    from waitress import serve
+
+    host = os.environ.get("API_LISTEN_ADDRESS", "0.0.0.0")
+    port = int(os.environ.get("API_PORT", "8000"))
+    log.info("Starting API server on %s:%d...", host, port)
+    serve(app, host=host, port=port, threads=20)
