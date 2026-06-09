@@ -60,6 +60,7 @@ def test_ready_returns_ok_when_readiness_check_succeeds():
         "database": "ok",
         "schema_version": "0001_symbol_master_vendor_traceability",
         "tables": 7,
+        "signal_tables": 0,
     }
 
 

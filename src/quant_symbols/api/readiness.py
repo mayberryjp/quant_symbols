@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from quant_symbols._cli_impl import EXPECTED_SCHEMA_VERSION, EXPECTED_TABLES
+from quant_symbols._cli_impl import (
+    EXPECTED_SCHEMA_VERSION,
+    EXPECTED_SIGNAL_TABLES,
+    EXPECTED_TABLES,
+)
 
 
 class ReadinessError(RuntimeError):
@@ -17,6 +21,7 @@ class ReadinessStatus:
     database: str
     schema_version: str
     tables: int
+    signal_tables: int = 0
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -24,6 +29,7 @@ class ReadinessStatus:
             "database": self.database,
             "schema_version": self.schema_version,
             "tables": self.tables,
+            "signal_tables": self.signal_tables,
         }
 
 
@@ -70,13 +76,28 @@ def check_database_readiness(database_url: str | None = None) -> ReadinessStatus
             schema_version = connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            tables = tuple(
+            symbol_tables = tuple(
                 connection.execute(
                     text(
                         """
                         SELECT table_name
                         FROM information_schema.tables
                         WHERE table_schema = 'symbol_master'
+                          AND table_type = 'BASE TABLE'
+                        ORDER BY table_name
+                        """
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            signal_tables = tuple(
+                connection.execute(
+                    text(
+                        """
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema = 'signals'
                           AND table_type = 'BASE TABLE'
                         ORDER BY table_name
                         """
@@ -92,13 +113,19 @@ def check_database_readiness(database_url: str | None = None) -> ReadinessStatus
         raise ReadinessError(
             f"schema_version={schema_version} expected={EXPECTED_SCHEMA_VERSION}"
         )
-    if tables != expected_table_names:
+    if symbol_tables != expected_table_names:
         raise ReadinessError(
-            f"tables={','.join(tables)} expected={','.join(expected_table_names)}"
+            f"symbol_tables={','.join(symbol_tables)} expected={','.join(expected_table_names)}"
+        )
+    expected_signal_table_names = tuple(sorted(EXPECTED_SIGNAL_TABLES))
+    if signal_tables != expected_signal_table_names:
+        raise ReadinessError(
+            f"signal_tables={','.join(signal_tables)} expected={','.join(expected_signal_table_names)}"
         )
 
     return ReadinessStatus(
         database="ok",
         schema_version=schema_version,
-        tables=len(tables),
+        tables=len(symbol_tables),
+        signal_tables=len(signal_tables),
     )

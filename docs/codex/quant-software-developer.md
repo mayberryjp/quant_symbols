@@ -75,6 +75,116 @@ MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live --ticker
 Normal tests use mocked HTTP responses and do not require a live Massive/Polygon
 API key.
 
+## Issue 57 Signal Pipeline And Watchlist Service
+
+The repository now includes a Postgres-backed first slice of the signal intake
+and watchlist pipeline.
+
+Implemented tables are created by Alembic revision
+`0002_signal_watchlist_pipeline` under the existing `signals` schema:
+
+- `signals.signal_sources` stores source names and source types. Source names
+  are unique; signal intake auto-creates strategy sources by name and manual
+  watchlist adds auto-create manual sources.
+- `signals.signal_events` stores immutable submitted events. Intake preserves
+  the submitted ticker, market, locale, reason, score, confidence, tags,
+  metadata, and idempotency key. Processing may update only status, normalized
+  symbol fields, rejection reason, and timestamps.
+- `signals.watchlist_entries` stores API-visible watchlist state. Active rows
+  are idempotent by normalized `symbol_id/source/signal_type` when a symbol is
+  resolved, and by submitted ticker/source/market/locale/signal type only when
+  no normalized symbol is available.
+- `signals.worker_heartbeats` stores the latest supervised worker heartbeat and
+  last processed event id.
+
+Normalized symbol identity remains central. A submitted ticker string is kept
+for audit and operator context, but watchlist uniqueness prefers
+`symbol_master.symbols.id` because ticker strings can be reused, aliased,
+renamed, delisted, or represented differently by vendors. The worker resolves
+submitted tickers against `symbol_master.symbols.canonical_ticker` and active
+`symbol_master.symbol_aliases` before writing an active watchlist entry.
+
+## Issue 57 API Contract
+
+Implemented signal/watchlist endpoints:
+
+```text
+GET /signal-pipeline/health
+GET /signal-pipeline/ready
+POST /signals
+GET /signals
+GET /signals/{signal_event_id}
+GET /watchlist
+GET /watchlist/{watchlist_entry_id}
+GET /watchlist/by-ticker/{ticker}
+POST /watchlist
+PATCH /watchlist/{watchlist_entry_id}
+```
+
+`POST /signals` validates `source`, `idempotency_key`, `ticker`,
+`signal_type`, and `reason` before persistence. `reason` may be supplied either
+as the top-level `reason` field or as `metadata.reason`. `score` and
+`confidence` must be numbers between 0 and 1. `direction`, when supplied, must
+be `long`, `short`, or `neutral`. Tags must be an array of non-empty strings
+with at most 20 values. Metadata must be a JSON object with at most 100
+top-level keys. Duplicate `(source, idempotency_key)` submissions return the
+existing signal event instead of creating another event.
+
+Signal intake does not call Massive/Polygon, does not place trades, and does
+not trigger broker behavior.
+
+`POST /watchlist` is the manual/operator path. It requires `ticker` and
+`reason`, defaults `source` to `operator`, resolves the ticker when possible,
+and upserts an active watchlist entry without pretending that the row came from
+a strategy signal.
+
+`PATCH /watchlist/{watchlist_entry_id}` supports status/active changes, reason,
+tags, metadata, and update reason. Deactivation sets `active=false`, uses
+`inactive` when no explicit status is supplied, and keeps the row for history.
+
+## Issue 57 Worker And Operations
+
+The worker entrypoint is:
+
+```bash
+python3 -m quant_symbols.cli signals worker
+```
+
+For local one-batch validation:
+
+```bash
+python3 -m quant_symbols.cli signals worker --once
+```
+
+The supervisor process name is `signal-watchlist-worker`, configured in
+`supervisord.conf`. Optional worker tuning environment variables are:
+
+- `SIGNAL_WORKER_NAME`, default `signal-watchlist-worker`
+- `SIGNAL_WORKER_BATCH_SIZE`, default `50`
+- `SIGNAL_WORKER_POLL_SECONDS`, default `5`
+
+The worker claims pending events with `FOR UPDATE SKIP LOCKED`, resolves the
+submitted ticker against normalized symbol master rows and aliases, upserts the
+watchlist idempotently, marks unresolved events with a rejection reason, marks
+unexpected failures as `failed`, and updates `signals.worker_heartbeats`.
+Inactive-only symbol matches are not promoted to active watchlist entries.
+
+Operational checks:
+
+```bash
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli db verify
+curl /signal-pipeline/health
+curl /signal-pipeline/ready
+curl '/signals?status=pending'
+curl '/watchlist?active=true'
+```
+
+Known limitation: Kafka/NATS/Redis Streams are intentionally deferred. The
+stable contract is the durable Postgres event table; a future broker adapter
+can persist producer events into `signals.signal_events` while keeping the
+existing worker and API contract.
+
 ## Issue 29 Slice 1 Verification
 
 The current #29 software slice verified in this checkout is the mocked

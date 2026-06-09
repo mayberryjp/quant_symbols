@@ -13,6 +13,17 @@ from quant_symbols.api.readiness import (
     check_database_readiness,
     sanitize_readiness_error,
 )
+from quant_symbols.api.signal_pipeline import (
+    accept_signal,
+    create_watchlist,
+    get_signal,
+    get_signal_pipeline_status,
+    get_watchlist,
+    list_signals,
+    list_watchlist,
+    lookup_watchlist_by_ticker,
+    update_watchlist,
+)
 from quant_symbols.api.symbols import (
     SymbolListParams,
     SymbolTickerLookupParams,
@@ -37,6 +48,14 @@ from quant_symbols.api.traceability import (
     list_symbol_vendor_ids,
     list_vendor_runs,
 )
+from quant_symbols.signal_pipeline.models import (
+    SignalListParams,
+    SignalValidationError,
+    WatchlistListParams,
+    manual_watchlist_from_payload,
+    signal_submission_from_payload,
+    watchlist_patch_from_payload,
+)
 
 SERVICE_NAME = "quant-symbols-api"
 
@@ -55,6 +74,15 @@ VendorRunDetail = Callable[[int], Optional[Dict[str, Any]]]
 SyncLatest = Callable[[SyncLatestParams], Optional[Dict[str, Any]]]
 SyncRuns = Callable[[SyncRunListParams], Dict[str, Any]]
 SyncRunDetail = Callable[[int], Optional[Dict[str, Any]]]
+SignalAccept = Callable[[Any], Dict[str, Any]]
+SignalListCallable = Callable[[SignalListParams], Dict[str, Any]]
+SignalDetail = Callable[[int], Optional[Dict[str, Any]]]
+WatchlistListCallable = Callable[[WatchlistListParams], Dict[str, Any]]
+WatchlistDetail = Callable[[int], Optional[Dict[str, Any]]]
+WatchlistByTicker = Callable[[str], Optional[Dict[str, Any]]]
+WatchlistCreate = Callable[[Any], Dict[str, Any]]
+WatchlistPatchCallable = Callable[[int, Any], Optional[Dict[str, Any]]]
+SignalPipelineStatus = Callable[[], Dict[str, Any]]
 
 VALID_RUN_STATUSES = frozenset(("running", "succeeded", "failed", "cancelled"))
 
@@ -129,6 +157,16 @@ def _validation_error_response(detail: str = "validation error") -> dict:
     return {"detail": detail}
 
 
+def _json_payload() -> Any:
+    try:
+        payload = request.json
+    except Exception as exc:
+        raise _ValidationError("request body must be valid JSON") from exc
+    if payload is None:
+        raise _ValidationError("request body must be a JSON object")
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # Application factory
 # ---------------------------------------------------------------------------
@@ -146,6 +184,15 @@ def create_app(
     sync_latest: SyncLatest = get_latest_sync_run,
     sync_runs: SyncRuns = list_sync_runs,
     sync_run_detail: SyncRunDetail = get_sync_run,
+    signal_accept: SignalAccept = accept_signal,
+    signal_list: SignalListCallable = list_signals,
+    signal_detail: SignalDetail = get_signal,
+    watchlist_list: WatchlistListCallable = list_watchlist,
+    watchlist_detail: WatchlistDetail = get_watchlist,
+    watchlist_by_ticker: WatchlistByTicker = lookup_watchlist_by_ticker,
+    watchlist_create: WatchlistCreate = create_watchlist,
+    watchlist_patch: WatchlistPatchCallable = update_watchlist,
+    signal_pipeline_status: SignalPipelineStatus = get_signal_pipeline_status,
 ) -> Bottle:
     api = Bottle()
     api.title = SERVICE_NAME
@@ -187,6 +234,156 @@ def create_app(
                 "database": "error",
                 "error": sanitize_readiness_error(exc, os.environ.get("DATABASE_URL")),
             }
+
+    # -- signal pipeline ------------------------------------------------
+
+    @api.get("/signal-pipeline/health")
+    def signal_pipeline_health() -> dict:
+        return {"status": "ok", "service": "signal-pipeline"}
+
+    @api.get("/signal-pipeline/ready")
+    def signal_pipeline_ready() -> dict:
+        try:
+            status = _status_payload(readiness_check())
+            pipeline = signal_pipeline_status()
+        except Exception as exc:
+            response.status = 503
+            return {
+                "status": "not_ready",
+                "database": "error",
+                "error": sanitize_readiness_error(exc, os.environ.get("DATABASE_URL")),
+            }
+        return {"status": "ok", "database": status["database"], "schema_version": status["schema_version"], "pipeline": pipeline}
+
+    @api.post("/signals")
+    def signals_post() -> dict:
+        try:
+            submission = signal_submission_from_payload(_json_payload())
+        except (SignalValidationError, _ValidationError) as exc:
+            return _validation_error_response(str(exc))
+        try:
+            result = signal_accept(submission)
+        except Exception as exc:
+            return _server_error(exc)
+        if result.get("status") == "duplicate":
+            response.status = 200
+        else:
+            response.status = 202
+        return result
+
+    @api.get("/signals/<signal_event_id>")
+    def signal_detail_route(signal_event_id: str) -> dict:
+        try:
+            sid = int(signal_event_id)
+        except (ValueError, TypeError):
+            return _validation_error_response("signal_event_id must be an integer")
+        try:
+            result = signal_detail(sid)
+        except Exception as exc:
+            return _server_error(exc)
+        if result is None:
+            return _not_found("signal event not found")
+        return result
+
+    @api.get("/signals")
+    def signals_get() -> dict:
+        try:
+            limit = _int_param(request.query.get("limit"), default=100, ge=1, le=500)
+            offset = _int_param(request.query.get("offset"), default=0, ge=0)
+        except _ValidationError:
+            return _validation_error_response()
+        params = SignalListParams(
+            source=request.query.get("source") or None,
+            ticker=request.query.get("ticker") or None,
+            status=request.query.get("status") or None,
+            signal_type=request.query.get("signal_type") or None,
+            limit=limit,
+            offset=offset,
+        )
+        try:
+            return signal_list(params)
+        except Exception as exc:
+            return _server_error(exc)
+
+    @api.get("/watchlist/by-ticker/<ticker>")
+    def watchlist_by_ticker_route(ticker: str) -> dict:
+        try:
+            result = watchlist_by_ticker(
+                ticker,
+                market=request.query.get("market", "stocks"),
+                locale=request.query.get("locale", "us"),
+            )
+        except Exception as exc:
+            return _server_error(exc)
+        if result is None:
+            return _not_found("watchlist entry not found")
+        return result
+
+    @api.get("/watchlist/<watchlist_entry_id>")
+    def watchlist_detail_route(watchlist_entry_id: str) -> dict:
+        try:
+            wid = int(watchlist_entry_id)
+        except (ValueError, TypeError):
+            return _validation_error_response("watchlist_entry_id must be an integer")
+        try:
+            result = watchlist_detail(wid)
+        except Exception as exc:
+            return _server_error(exc)
+        if result is None:
+            return _not_found("watchlist entry not found")
+        return result
+
+    @api.get("/watchlist")
+    def watchlist_get() -> dict:
+        try:
+            limit = _int_param(request.query.get("limit"), default=100, ge=1, le=500)
+            offset = _int_param(request.query.get("offset"), default=0, ge=0)
+        except _ValidationError:
+            return _validation_error_response()
+        params = WatchlistListParams(
+            active=_bool_param(request.query.get("active"), default=True),
+            source=request.query.get("source") or None,
+            ticker=request.query.get("ticker") or None,
+            market=request.query.get("market") or None,
+            locale=request.query.get("locale") or None,
+            tag=request.query.get("tag") or None,
+            signal_type=request.query.get("signal_type") or None,
+            limit=limit,
+            offset=offset,
+        )
+        try:
+            return watchlist_list(params)
+        except Exception as exc:
+            return _server_error(exc)
+
+    @api.post("/watchlist")
+    def watchlist_post() -> dict:
+        try:
+            manual_request = manual_watchlist_from_payload(_json_payload())
+        except (SignalValidationError, _ValidationError) as exc:
+            return _validation_error_response(str(exc))
+        try:
+            response.status = 201
+            return watchlist_create(manual_request)
+        except Exception as exc:
+            return _server_error(exc)
+
+    @api.patch("/watchlist/<watchlist_entry_id>")
+    def watchlist_patch_route(watchlist_entry_id: str) -> dict:
+        try:
+            wid = int(watchlist_entry_id)
+            patch = watchlist_patch_from_payload(_json_payload())
+        except (ValueError, TypeError):
+            return _validation_error_response("watchlist_entry_id must be an integer")
+        except (SignalValidationError, _ValidationError) as exc:
+            return _validation_error_response(str(exc))
+        try:
+            result = watchlist_patch(wid, patch)
+        except Exception as exc:
+            return _server_error(exc)
+        if result is None:
+            return _not_found("watchlist entry not found")
+        return result
 
     # -- symbol by ticker -----------------------------------------------
 
