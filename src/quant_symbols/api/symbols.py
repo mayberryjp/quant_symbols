@@ -16,6 +16,14 @@ class SymbolListParams:
 
 
 @dataclass(frozen=True)
+class SymbolCountParams:
+    active: bool | None = None
+    market: str | None = None
+    locale: str | None = None
+    q: str | None = None
+
+
+@dataclass(frozen=True)
 class SymbolTickerLookupParams:
     ticker: str
     market: str = "stocks"
@@ -57,7 +65,7 @@ def list_symbols(params: SymbolListParams) -> dict[str, Any]:
                     LIMIT :limit OFFSET :offset
                     """
                 ),
-                _query_values(params),
+                _list_query_values(params),
             ).mappings().all()
     finally:
         engine.dispose()
@@ -68,6 +76,40 @@ def list_symbols(params: SymbolListParams) -> dict[str, Any]:
         "limit": params.limit,
         "offset": params.offset,
         "count": len(items),
+    }
+
+
+def count_symbols(params: SymbolCountParams) -> dict[str, Any]:
+    from sqlalchemy import create_engine, text
+
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            total = connection.execute(
+                text(
+                    f"""
+                    SELECT count(*) AS total
+                    FROM symbol_master.symbols s
+                    {_where_clause(params)}
+                    """
+                ),
+                _filter_query_values(params),
+            ).scalar_one()
+    finally:
+        engine.dispose()
+
+    return {
+        "total": int(total),
+        "filters": {
+            "active": params.active,
+            "market": params.market,
+            "locale": params.locale,
+            "q": params.q,
+        },
     }
 
 
@@ -182,7 +224,7 @@ def get_symbol_by_ticker(params: SymbolTickerLookupParams) -> dict[str, Any] | N
     return _row_to_detail(row)
 
 
-def _where_clause(params: SymbolListParams) -> str:
+def _where_clause(params: SymbolListParams | SymbolCountParams) -> str:
     predicates = []
     if params.active is not None:
         predicates.append("s.active = :active")
@@ -204,11 +246,19 @@ def _where_clause(params: SymbolListParams) -> str:
     return "WHERE " + " AND ".join(predicates)
 
 
-def _query_values(params: SymbolListParams) -> dict[str, Any]:
-    values: dict[str, Any] = {
-        "limit": params.limit,
-        "offset": params.offset,
-    }
+def _list_query_values(params: SymbolListParams) -> dict[str, Any]:
+    values = _filter_query_values(params)
+    values.update(
+        {
+            "limit": params.limit,
+            "offset": params.offset,
+        }
+    )
+    return values
+
+
+def _filter_query_values(params: SymbolListParams | SymbolCountParams) -> dict[str, Any]:
+    values: dict[str, Any] = {}
     if params.active is not None:
         values["active"] = params.active
     if params.market is not None:
