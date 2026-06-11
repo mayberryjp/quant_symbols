@@ -59,11 +59,11 @@ This is the ingestion and normalization layer that sits between vendor data and 
 
 ### REST API (`src/quant_symbols/api/`)
 
-FastAPI app created via `create_app()` factory in `app.py`. All handler dependencies are **injectable callables** (same pattern as the vendor transport), making tests fast and DB-free.
+Bottle app created via `create_app()` factory in `app.py`. All handler dependencies are **injectable callables** (same pattern as the vendor transport), making tests fast and DB-free.
 
 Endpoints cover: health/readiness, symbol listing/detail/lookup-by-ticker, symbol aliases, vendor identities, raw payloads, vendor runs, and sync status.
 
-Run locally: `uvicorn quant_symbols.api.app:create_app --factory --port 8000`
+Run locally: `python3 -m quant_symbols.api.app` (reads `API_PORT` from env, default 8000)
 
 ### Database & Migrations
 
@@ -88,5 +88,5 @@ GitHub Actions workflows in `.github/workflows/` dispatch work to self-hosted ru
 - Tests use fixture JSON files in `tests/fixtures/` and fake transport objects — no live API calls in normal test runs.
 - Config is always loaded from environment variables; never hardcode credentials.
 - The vendor name "Massive" is the internal alias for the Polygon.io data provider.
-- FastAPI handlers use injectable callable dependencies (not FastAPI's `Depends`); this allows tests to pass fake implementations directly to `create_app()`.
+- Bottle handlers use injectable callable dependencies; this allows tests to pass fake implementations directly to `create_app()`.
 - Repository classes accept a SQLAlchemy engine/connection; they never create their own connections.
