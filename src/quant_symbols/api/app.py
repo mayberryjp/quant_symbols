@@ -14,8 +14,10 @@ from quant_symbols.api.readiness import (
     sanitize_readiness_error,
 )
 from quant_symbols.api.symbols import (
+    SymbolCountParams,
     SymbolListParams,
     SymbolTickerLookupParams,
+    count_symbols,
     get_symbol_by_id,
     get_symbol_by_ticker,
     list_symbols,
@@ -45,6 +47,7 @@ log = logging.getLogger(SERVICE_NAME)
 
 ReadinessCheck = Callable[[], Union[ReadinessStatus, Dict[str, Any]]]
 SymbolList = Callable[[SymbolListParams], Dict[str, Any]]
+SymbolCount = Callable[[SymbolCountParams], Dict[str, Any]]
 SymbolDetail = Callable[[int], Optional[Dict[str, Any]]]
 SymbolByTicker = Callable[[SymbolTickerLookupParams], Optional[Dict[str, Any]]]
 SymbolAliases = Callable[[int], Optional[Dict[str, Any]]]
@@ -136,6 +139,7 @@ def _validation_error_response(detail: str = "validation error") -> dict:
 def create_app(
     readiness_check: ReadinessCheck = check_database_readiness,
     symbol_list: SymbolList = list_symbols,
+    symbol_count: SymbolCount = count_symbols,
     symbol_detail: SymbolDetail = get_symbol_by_id,
     symbol_by_ticker: SymbolByTicker = get_symbol_by_ticker,
     symbol_aliases: SymbolAliases = list_symbol_aliases,
@@ -208,6 +212,24 @@ def create_app(
         return symbol
 
     # -- symbol sub-resources (must precede /symbols/<symbol_id>) -------
+
+    @api.get("/symbols/count")
+    def symbol_count_route() -> dict:
+        if request.query.get("limit") is not None or request.query.get("offset") is not None:
+            return _validation_error_response("limit and offset are not supported for symbol counts")
+        active = _bool_param(request.query.get("active"))
+        raw_q = request.query.get("q")
+        q = raw_q.strip() if raw_q and raw_q.strip() else None
+        params = SymbolCountParams(
+            active=active,
+            market=request.query.get("market") or None,
+            locale=request.query.get("locale") or None,
+            q=q,
+        )
+        try:
+            return symbol_count(params)
+        except Exception as exc:
+            return _server_error(exc)
 
     @api.get("/symbols/<symbol_id>/aliases")
     def symbol_aliases_route(symbol_id: str) -> dict:

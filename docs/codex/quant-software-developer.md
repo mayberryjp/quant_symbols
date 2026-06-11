@@ -1,5 +1,47 @@
 # Quant Software Developer Notes
 
+## Issue 55 Read-Only Symbol Count API
+
+The read-only API exposes `GET /symbols/count` for the aggregate row count of
+normalized symbols in `symbol_master.symbols`. The endpoint accepts the same
+symbol filters that apply to `GET /symbols` where they affect the symbol
+universe:
+
+- `active=true|false`
+- `market=stocks`
+- `locale=us`
+- `q=AAPL`
+
+The endpoint does not accept pagination parameters for its result shape.
+Requests that include `limit` or `offset` return a validation response because
+the endpoint is an aggregate:
+
+```json
+{
+  "total": 12345,
+  "filters": {
+    "active": true,
+    "market": "stocks",
+    "locale": "us",
+    "q": null
+  }
+}
+```
+
+`src/quant_symbols/api/symbols.py` implements `SymbolCountParams` and
+`count_symbols`. The count query uses `SELECT count(*) AS total FROM
+symbol_master.symbols s` and the same shared optional filter helper as
+`list_symbols`, including ticker/name `q` matching through escaped SQL `LIKE`
+predicates. This keeps `/symbols` and `/symbols/count` filter behavior aligned
+while preserving `/symbols` page-level `count` as the number of returned items.
+
+`src/quant_symbols/api/app.py` wires the count route through the same injected
+repository pattern and secret-redacting error handler used by the existing
+symbol routes. The route is defined before dynamic symbol-id routes so
+`/symbols/count` is not parsed as a symbol id. It only reads from Postgres
+through `DATABASE_URL`; it does not call Massive/Polygon, start sync jobs, run
+normalization, or write to symbol-master tables.
+
 ## Massive/Polygon Vendor Client
 
 The repository now includes a retrieval-only Massive/Polygon vendor module under
