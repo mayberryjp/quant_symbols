@@ -1,10 +1,16 @@
 from pathlib import Path
 
-from quant_symbols.cli import EXPECTED_SCHEMA_VERSION, EXPECTED_TABLES, build_parser
+from quant_symbols.cli import (
+    EXPECTED_SCHEMA_VERSION,
+    EXPECTED_SYMBOL_MASTER_TABLES,
+    EXPECTED_TRADING_TABLES,
+    build_parser,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MIGRATION = REPO_ROOT / "alembic" / "versions" / "0001_symbol_master_vendor_traceability.py"
+POSITIONS_MIGRATION = REPO_ROOT / "alembic" / "versions" / "0002_positions_orders.py"
 
 
 def test_cli_exposes_required_db_commands():
@@ -20,10 +26,14 @@ def test_cli_exposes_required_db_commands():
 
 def test_migration_declares_expected_revision_and_tables():
     migration_text = MIGRATION.read_text()
+    positions_migration_text = POSITIONS_MIGRATION.read_text()
 
-    assert f'revision = "{EXPECTED_SCHEMA_VERSION}"' in migration_text
-    for table in EXPECTED_TABLES:
+    assert 'revision = "0001_symbol_master_vendor_traceability"' in migration_text
+    assert f'revision = "{EXPECTED_SCHEMA_VERSION}"' in positions_migration_text
+    for table in EXPECTED_SYMBOL_MASTER_TABLES:
         assert f"CREATE TABLE symbol_master.{table}" in migration_text
+    for table in EXPECTED_TRADING_TABLES:
+        assert f"CREATE TABLE trading.{table}" in positions_migration_text
 
 
 def test_migration_keeps_vendor_payloads_jsonb_and_trace_links():

@@ -39,6 +39,20 @@ from quant_symbols.api.traceability import (
     list_symbol_vendor_ids,
     list_vendor_runs,
 )
+from quant_symbols.positions.service import (
+    OrderCreateParams,
+    PositionListParams,
+    PortfolioCreateParams,
+    PositionValidationError,
+    create_portfolio,
+    get_position,
+    get_position_by_ticker,
+    list_portfolios,
+    list_positions,
+    order_params_from_payload,
+    portfolio_params_from_payload,
+    submit_order,
+)
 
 SERVICE_NAME = "quant-symbols-api"
 
@@ -58,6 +72,12 @@ VendorRunDetail = Callable[[int], Optional[Dict[str, Any]]]
 SyncLatest = Callable[[SyncLatestParams], Optional[Dict[str, Any]]]
 SyncRuns = Callable[[SyncRunListParams], Dict[str, Any]]
 SyncRunDetail = Callable[[int], Optional[Dict[str, Any]]]
+PortfolioList = Callable[[], Dict[str, Any]]
+PortfolioCreate = Callable[[PortfolioCreateParams], Dict[str, Any]]
+PositionList = Callable[[PositionListParams], Dict[str, Any]]
+PositionDetail = Callable[[int], Optional[Dict[str, Any]]]
+PositionByTicker = Callable[..., Optional[Dict[str, Any]]]
+OrderSubmit = Callable[[OrderCreateParams], Dict[str, Any]]
 
 VALID_RUN_STATUSES = frozenset(("running", "succeeded", "failed", "cancelled"))
 
@@ -132,6 +152,13 @@ def _validation_error_response(detail: str = "validation error") -> dict:
     return {"detail": detail}
 
 
+def _json_payload() -> Any:
+    payload = request.json
+    if payload is None:
+        raise PositionValidationError("request body must be a JSON object")
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # Application factory
 # ---------------------------------------------------------------------------
@@ -150,6 +177,12 @@ def create_app(
     sync_latest: SyncLatest = get_latest_sync_run,
     sync_runs: SyncRuns = list_sync_runs,
     sync_run_detail: SyncRunDetail = get_sync_run,
+    portfolio_list: PortfolioList = list_portfolios,
+    portfolio_create: PortfolioCreate = create_portfolio,
+    position_list: PositionList = list_positions,
+    position_detail: PositionDetail = get_position,
+    position_by_ticker: PositionByTicker = get_position_by_ticker,
+    order_submit: OrderSubmit = submit_order,
 ) -> Bottle:
     api = Bottle()
     api.title = SERVICE_NAME
@@ -191,6 +224,104 @@ def create_app(
                 "database": "error",
                 "error": sanitize_readiness_error(exc, os.environ.get("DATABASE_URL")),
             }
+
+    @api.get("/positions/health")
+    def positions_health() -> dict:
+        return {"status": "ok", "service": "quant-positions-api"}
+
+    @api.get("/positions/ready")
+    def positions_ready() -> dict:
+        try:
+            return _status_payload(readiness_check())
+        except Exception as exc:
+            response.status = 503
+            return {
+                "status": "not_ready",
+                "database": "error",
+                "error": sanitize_readiness_error(exc, os.environ.get("DATABASE_URL")),
+            }
+
+    @api.get("/portfolios")
+    def portfolios_route() -> dict:
+        try:
+            return portfolio_list()
+        except Exception as exc:
+            return _server_error(exc)
+
+    @api.post("/portfolios")
+    def create_portfolio_route() -> dict:
+        try:
+            result = portfolio_create(portfolio_params_from_payload(_json_payload()))
+        except PositionValidationError as exc:
+            return _validation_error_response(str(exc))
+        except Exception as exc:
+            return _server_error(exc)
+        response.status = 201
+        return result
+
+    @api.get("/positions/by-ticker/<ticker>")
+    def position_by_ticker_route(ticker: str) -> dict:
+        portfolio = request.query.get("portfolio")
+        if not portfolio:
+            return _validation_error_response("portfolio is required")
+        try:
+            result = position_by_ticker(
+                portfolio=portfolio,
+                ticker=ticker,
+                market=request.query.get("market", "stocks"),
+                locale=request.query.get("locale", "us"),
+            )
+        except Exception as exc:
+            return _server_error(exc)
+        if result is None:
+            return _not_found("position not found")
+        return result
+
+    @api.get("/positions/<position_id>")
+    def position_detail_route(position_id: str) -> dict:
+        try:
+            pid = int(position_id)
+        except (ValueError, TypeError):
+            return _validation_error_response("position_id must be an integer")
+        try:
+            result = position_detail(pid)
+        except Exception as exc:
+            return _server_error(exc)
+        if result is None:
+            return _not_found("position not found")
+        return result
+
+    @api.get("/positions")
+    def positions_route() -> dict:
+        try:
+            limit = _int_param(request.query.get("limit"), default=100, ge=1, le=500)
+            offset = _int_param(request.query.get("offset"), default=0, ge=0)
+        except _ValidationError:
+            return _validation_error_response()
+        params = PositionListParams(
+            portfolio=request.query.get("portfolio") or None,
+            active=_bool_param(request.query.get("active")),
+            ticker=request.query.get("ticker") or None,
+            market=request.query.get("market") or None,
+            locale=request.query.get("locale") or None,
+            limit=limit,
+            offset=offset,
+        )
+        try:
+            return position_list(params)
+        except Exception as exc:
+            return _server_error(exc)
+
+    @api.post("/orders")
+    def orders_route() -> dict:
+        try:
+            result = order_submit(order_params_from_payload(_json_payload()))
+        except PositionValidationError as exc:
+            return _validation_error_response(str(exc))
+        except Exception as exc:
+            return _server_error(exc)
+        response.status = 201 if result.get("status") == "submitted" else 200
+        return result
 
     # -- symbol by ticker -----------------------------------------------
 

@@ -6,8 +6,8 @@ import os
 from pathlib import Path
 
 
-EXPECTED_SCHEMA_VERSION = "0001_symbol_master_vendor_traceability"
-EXPECTED_TABLES = (
+EXPECTED_SCHEMA_VERSION = "0002_positions_orders"
+EXPECTED_SYMBOL_MASTER_TABLES = (
     "vendor_sources",
     "vendor_api_runs",
     "raw_vendor_payloads",
@@ -16,6 +16,16 @@ EXPECTED_TABLES = (
     "symbol_vendor_ids",
     "symbol_aliases",
 )
+EXPECTED_TRADING_TABLES = (
+    "portfolios",
+    "positions",
+    "order_intents",
+    "order_events",
+    "order_fills",
+    "position_ledger_entries",
+    "worker_heartbeats",
+)
+EXPECTED_TABLES = EXPECTED_SYMBOL_MASTER_TABLES
 
 
 def _repo_root() -> Path:
@@ -53,19 +63,31 @@ def db_verify(_args: argparse.Namespace) -> None:
     from sqlalchemy import create_engine, text
 
     engine = create_engine(_database_url(), pool_pre_ping=True)
-    expected_table_names = tuple(sorted(EXPECTED_TABLES))
+    expected_symbol_table_names = tuple(sorted(EXPECTED_SYMBOL_MASTER_TABLES))
+    expected_trading_table_names = tuple(sorted(EXPECTED_TRADING_TABLES))
 
     with engine.connect() as connection:
         connection.execute(text("SELECT 1")).scalar_one()
         schema_version = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-        tables = connection.execute(
+        symbol_tables = connection.execute(
             text(
                 """
                 SELECT table_name
                 FROM information_schema.tables
                 WHERE table_schema = 'symbol_master'
+                  AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+                """
+            )
+        ).scalars().all()
+        trading_tables = connection.execute(
+            text(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'trading'
                   AND table_type = 'BASE TABLE'
                 ORDER BY table_name
                 """
@@ -82,13 +104,22 @@ def db_verify(_args: argparse.Namespace) -> None:
         raise SystemExit(
             f"schema_version={schema_version} expected={EXPECTED_SCHEMA_VERSION}"
         )
-    if tuple(tables) != expected_table_names:
-        raise SystemExit(f"tables={','.join(tables)} expected={','.join(expected_table_names)}")
+    if tuple(symbol_tables) != expected_symbol_table_names:
+        raise SystemExit(
+            f"symbol_master_tables={','.join(symbol_tables)} "
+            f"expected={','.join(expected_symbol_table_names)}"
+        )
+    if tuple(trading_tables) != expected_trading_table_names:
+        raise SystemExit(
+            f"trading_tables={','.join(trading_tables)} "
+            f"expected={','.join(expected_trading_table_names)}"
+        )
 
     print(
         "postgres=ok "
         f"schema_version={schema_version} "
-        f"tables={len(tables)} "
+        f"symbol_master_tables={len(symbol_tables)} "
+        f"trading_tables={len(trading_tables)} "
         f"vendor_sources={vendor_sources} "
         f"exchanges={exchanges}"
     )

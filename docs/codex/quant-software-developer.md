@@ -117,6 +117,84 @@ MASSIVE_API_KEY=... python3 -m quant_symbols.vendors.massive.cli --live --ticker
 Normal tests use mocked HTTP responses and do not require a live Massive/Polygon
 API key.
 
+## Positions And Order Management Foundation
+
+Issue #59 adds the first positions/order-management software slice. The durable
+schema lives in Alembic revision `0002_positions_orders` and creates a separate
+`trading` schema for:
+
+- `portfolios`
+- `positions`
+- `order_intents`
+- `order_events`
+- `order_fills`
+- `position_ledger_entries`
+- `worker_heartbeats`
+
+The current implementation records API-submitted order intents only. It does not
+route orders to a broker, does not place live trades, and does not enable a
+broker adapter process. `order_intents` stores the submitted ticker and nullable
+`symbol_id` so unresolved tickers can be preserved for later validation while
+normalized symbol identity remains available when the symbol master has a match.
+
+`position_ledger_entries` is append-only at the database level. The migration
+adds a trigger that rejects updates and deletes. Current positions are stored in
+`trading.positions` with uniqueness rules for resolved `(portfolio_id,
+symbol_id)` positions and unresolved `(portfolio_id, submitted_ticker, market,
+locale)` positions.
+
+Order idempotency is enforced by `UNIQUE (portfolio_id, idempotency_key)` on
+`trading.order_intents`. Fill idempotency is prepared by a unique partial index
+on `(order_id, source, external_fill_id)` when `external_fill_id` is present.
+
+## Positions API Slice
+
+The Bottle app exposes the first positions/order endpoints:
+
+```text
+GET /positions/health
+GET /positions/ready
+GET /portfolios
+POST /portfolios
+GET /positions
+GET /positions/{position_id}
+GET /positions/by-ticker/{ticker}
+POST /orders
+```
+
+`GET /positions/health` is a liveness endpoint and does not require database
+access. `GET /positions/ready` reuses the existing database readiness contract.
+
+`POST /orders` validates and persists a buy/sell order intent, then writes the
+initial `submitted` order event in the same transaction. Duplicate order
+submission returns the existing order by portfolio/idempotency key and does not
+create another intent or event. The accepted order-intake slice supports:
+
+- `side`: `buy`, `sell`
+- `order_type`: `market`, `limit`
+- `time_in_force`: `day`, `gtc`, `ioc`, `fok`
+- exactly one of `quantity` or `notional`
+- required `portfolio`, `idempotency_key`, `ticker`, `source`, and `reason`
+
+Limit orders require `limit_price`; market orders reject `limit_price`.
+`stop_price` is intentionally rejected in this slice even though the schema has a
+nullable column for future lifecycle support.
+
+## Positions Configuration
+
+The positions/order slice uses the existing `DATABASE_URL` configuration. It
+adds no new secrets, API keys, or environment variables.
+
+Database validation uses:
+
+```bash
+python3 -m quant_symbols.cli db upgrade
+python3 -m quant_symbols.cli db verify
+```
+
+`db verify` now expects Alembic head `0002_positions_orders`, the existing seven
+`symbol_master` tables, and the seven new `trading` tables.
+
 ## Issue 29 Slice 1 Verification
 
 The current #29 software slice verified in this checkout is the mocked
