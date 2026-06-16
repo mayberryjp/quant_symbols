@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 
-EXPECTED_SCHEMA_VERSION = "0001_symbol_master_vendor_traceability"
+EXPECTED_SCHEMA_VERSION = "0002_signal_watchlist_pipeline"
 EXPECTED_TABLES = (
     "vendor_sources",
     "vendor_api_runs",
@@ -15,6 +15,12 @@ EXPECTED_TABLES = (
     "symbols",
     "symbol_vendor_ids",
     "symbol_aliases",
+)
+EXPECTED_SIGNAL_TABLES = (
+    "signal_sources",
+    "signal_events",
+    "watchlist_entries",
+    "worker_heartbeats",
 )
 
 
@@ -60,12 +66,23 @@ def db_verify(_args: argparse.Namespace) -> None:
         schema_version = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-        tables = connection.execute(
+        symbol_tables = connection.execute(
             text(
                 """
                 SELECT table_name
                 FROM information_schema.tables
                 WHERE table_schema = 'symbol_master'
+                  AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+                """
+            )
+        ).scalars().all()
+        signal_tables = connection.execute(
+            text(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'signals'
                   AND table_type = 'BASE TABLE'
                 ORDER BY table_name
                 """
@@ -82,13 +99,21 @@ def db_verify(_args: argparse.Namespace) -> None:
         raise SystemExit(
             f"schema_version={schema_version} expected={EXPECTED_SCHEMA_VERSION}"
         )
-    if tuple(tables) != expected_table_names:
-        raise SystemExit(f"tables={','.join(tables)} expected={','.join(expected_table_names)}")
+    if tuple(symbol_tables) != expected_table_names:
+        raise SystemExit(
+            f"symbol_tables={','.join(symbol_tables)} expected={','.join(expected_table_names)}"
+        )
+    expected_signal_table_names = tuple(sorted(EXPECTED_SIGNAL_TABLES))
+    if tuple(signal_tables) != expected_signal_table_names:
+        raise SystemExit(
+            f"signal_tables={','.join(signal_tables)} expected={','.join(expected_signal_table_names)}"
+        )
 
     print(
         "postgres=ok "
         f"schema_version={schema_version} "
-        f"tables={len(tables)} "
+        f"symbol_tables={len(symbol_tables)} "
+        f"signal_tables={len(signal_tables)} "
         f"vendor_sources={vendor_sources} "
         f"exchanges={exchanges}"
     )
@@ -219,6 +244,22 @@ def symbols_normalize_raw(args: argparse.Namespace) -> None:
     print(summary.format_line())
 
 
+def signal_worker(args: argparse.Namespace) -> None:
+    from quant_symbols.signal_pipeline.worker import (
+        SignalPipelineWorker,
+        WorkerOptions,
+    )
+
+    options = WorkerOptions(
+        worker_name=args.worker_name,
+        batch_size=args.batch_size,
+        poll_interval_seconds=args.poll_seconds,
+        run_once=args.once,
+    )
+    worker = SignalPipelineWorker(engine=_engine(), options=options)
+    worker.run_forever()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python3 -m quant_symbols.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -259,6 +300,16 @@ def build_parser() -> argparse.ArgumentParser:
     normalize_raw_selector.add_argument("--latest", action="store_true")
     normalize_raw_selector.add_argument("--run-id", type=int)
     normalize_raw_parser.set_defaults(func=symbols_normalize_raw)
+
+    signals_parser = subparsers.add_parser("signals")
+    signals_subparsers = signals_parser.add_subparsers(dest="signals_command", required=True)
+
+    worker_parser = signals_subparsers.add_parser("worker")
+    worker_parser.add_argument("--once", action="store_true", help="Process one batch then exit")
+    worker_parser.add_argument("--worker-name", default=os.environ.get("SIGNAL_WORKER_NAME", "signal-watchlist-worker"))
+    worker_parser.add_argument("--batch-size", type=int, default=int(os.environ.get("SIGNAL_WORKER_BATCH_SIZE", "50")))
+    worker_parser.add_argument("--poll-seconds", type=float, default=float(os.environ.get("SIGNAL_WORKER_POLL_SECONDS", "5")))
+    worker_parser.set_defaults(func=signal_worker)
 
     return parser
 
