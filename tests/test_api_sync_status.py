@@ -21,6 +21,8 @@ SYNC_RUN_SUMMARY = {
     "records_seen": 5,
     "records_inserted": 5,
     "records_failed": 0,
+    "symbols_new": 4,
+    "symbols_delisted": 1,
     "error_message": None,
     "raw_payload_count": 5,
 }
@@ -233,3 +235,77 @@ def test_sync_routes_preserve_existing_vendor_and_symbol_routes():
     }
     assert client.get("/symbols/1").json() == {"id": 1}
     assert seen == ["sync:5", "vendor-runs:3", "symbol:1"]
+
+
+def _fake_sync_engine(rows: list[dict[str, object]], calls: list[dict[str, object]]):
+    class FakeResult:
+        def mappings(self) -> "FakeResult":
+            return self
+
+        def all(self) -> list[dict[str, object]]:
+            return rows
+
+        def first(self) -> dict[str, object] | None:
+            return rows[0] if rows else None
+
+    class FakeConnection:
+        def __enter__(self) -> "FakeConnection":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def execute(self, statement: object, values: dict[str, object] | None = None) -> FakeResult:
+            calls.append({"statement": str(statement), "values": values})
+            return FakeResult()
+
+    class FakeEngine:
+        def connect(self) -> FakeConnection:
+            return FakeConnection()
+
+        def dispose(self) -> None:
+            calls.append({"disposed": True})
+
+    return FakeEngine()
+
+
+def test_list_sync_runs_selects_and_returns_symbol_counters(monkeypatch):
+    from datetime import datetime, timezone
+
+    from quant_symbols.api.sync_status import list_sync_runs
+
+    calls: list[dict[str, object]] = []
+    row = {
+        "id": 7,
+        "endpoint": "/v3/reference/tickers",
+        "status": "succeeded",
+        "started_at": datetime(2026, 7, 6, 9, 0, 0, tzinfo=timezone.utc),
+        "finished_at": datetime(2026, 7, 6, 9, 2, 30, tzinfo=timezone.utc),
+        "records_seen": 1000,
+        "records_inserted": 1000,
+        "records_failed": 0,
+        "symbols_new": 12,
+        "symbols_delisted": 3,
+        "error_message": None,
+        "vendor_id": 1,
+        "vendor_code": "massive",
+        "vendor_name": "Massive / Polygon",
+        "raw_payload_count": 1000,
+    }
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:pass@db/quant")
+    import sqlalchemy
+
+    monkeypatch.setattr(sqlalchemy, "create_engine", lambda *a, **k: _fake_sync_engine([row], calls))
+
+    result = list_sync_runs(SyncRunListParams())
+
+    assert result["count"] == 1
+    item = result["items"][0]
+    assert item["symbols_new"] == 12
+    assert item["symbols_delisted"] == 3
+    assert item["started_at"] == "2026-07-06T09:00:00+00:00"
+    assert item["finished_at"] == "2026-07-06T09:02:30+00:00"
+    statement = str(calls[0]["statement"])
+    assert "r.symbols_new" in statement
+    assert "r.symbols_delisted" in statement

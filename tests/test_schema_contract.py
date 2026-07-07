@@ -4,7 +4,8 @@ from quant_symbols.cli import EXPECTED_SCHEMA_VERSION, EXPECTED_TABLES, build_pa
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-MIGRATION = REPO_ROOT / "alembic" / "versions" / "0001_symbol_master_vendor_traceability.py"
+BASELINE_MIGRATION = REPO_ROOT / "alembic" / "versions" / "0001_symbol_master_vendor_traceability.py"
+HEAD_MIGRATION = REPO_ROOT / "alembic" / "versions" / "0002_vendor_run_symbol_counts.py"
 
 
 def test_cli_exposes_required_db_commands():
@@ -19,15 +20,24 @@ def test_cli_exposes_required_db_commands():
 
 
 def test_migration_declares_expected_revision_and_tables():
-    migration_text = MIGRATION.read_text()
+    baseline_text = BASELINE_MIGRATION.read_text()
+    head_text = HEAD_MIGRATION.read_text()
 
-    assert f'revision = "{EXPECTED_SCHEMA_VERSION}"' in migration_text
+    assert f'revision = "{EXPECTED_SCHEMA_VERSION}"' in head_text
     for table in EXPECTED_TABLES:
-        assert f"CREATE TABLE symbol_master.{table}" in migration_text
+        assert f"CREATE TABLE symbol_master.{table}" in baseline_text
+
+
+def test_head_migration_adds_run_symbol_counters():
+    head_text = HEAD_MIGRATION.read_text()
+
+    assert 'down_revision = "0001_symbol_master_vendor_traceability"' in head_text
+    assert "ADD COLUMN symbols_new integer NOT NULL DEFAULT 0" in head_text
+    assert "ADD COLUMN symbols_delisted integer NOT NULL DEFAULT 0" in head_text
 
 
 def test_migration_keeps_vendor_payloads_jsonb_and_trace_links():
-    migration_text = MIGRATION.read_text()
+    migration_text = BASELINE_MIGRATION.read_text()
 
     assert "payload jsonb NOT NULL" in migration_text
     assert "vendor_api_run_id bigint NOT NULL" in migration_text

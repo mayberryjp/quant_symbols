@@ -82,8 +82,8 @@ class SymbolMasterRepository:
             _text(
                 """
                 INSERT INTO symbol_master.vendor_api_runs
-                    (vendor_source_id, endpoint, request_params, status)
-                VALUES (:vendor_source_id, :endpoint, CAST(:request_params AS jsonb), 'running')
+                    (vendor_source_id, endpoint, request_params, status, started_at)
+                VALUES (:vendor_source_id, :endpoint, CAST(:request_params AS jsonb), 'running', clock_timestamp())
                 RETURNING id
                 """
             ),
@@ -103,6 +103,8 @@ class SymbolMasterRepository:
         records_seen: int,
         records_inserted: int,
         records_failed: int,
+        symbols_new: int = 0,
+        symbols_delisted: int = 0,
         error_message: str | None = None,
     ) -> None:
         self.connection.execute(
@@ -110,10 +112,12 @@ class SymbolMasterRepository:
                 """
                 UPDATE symbol_master.vendor_api_runs
                 SET status = :status,
-                    finished_at = now(),
+                    finished_at = clock_timestamp(),
                     records_seen = :records_seen,
                     records_inserted = :records_inserted,
                     records_failed = :records_failed,
+                    symbols_new = :symbols_new,
+                    symbols_delisted = :symbols_delisted,
                     error_message = :error_message
                 WHERE id = :run_id
                 """
@@ -124,6 +128,8 @@ class SymbolMasterRepository:
                 "records_seen": records_seen,
                 "records_inserted": records_inserted,
                 "records_failed": records_failed,
+                "symbols_new": symbols_new,
+                "symbols_delisted": symbols_delisted,
                 "error_message": error_message,
             },
         )

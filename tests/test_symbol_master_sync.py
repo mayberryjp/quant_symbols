@@ -81,4 +81,6 @@ def test_failure_path_marks_run_failed_and_preserves_counts(monkeypatch) -> None
     assert FakeRepository.finished["run_id"] == 123
     assert FakeRepository.finished["status"] == "failed"
     assert FakeRepository.finished["records_seen"] == 1
+    assert FakeRepository.finished["symbols_new"] == 0
+    assert FakeRepository.finished["symbols_delisted"] == 0
     assert "fixture://boom" in str(FakeRepository.finished["error_message"])

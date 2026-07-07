@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 
-EXPECTED_SCHEMA_VERSION = "0001_symbol_master_vendor_traceability"
+EXPECTED_SCHEMA_VERSION = "0002_vendor_run_symbol_counts"
 EXPECTED_TABLES = (
     "vendor_sources",
     "vendor_api_runs",

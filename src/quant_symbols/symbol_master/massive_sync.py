@@ -81,6 +81,8 @@ class MassiveSymbolSyncJob:
                     records_seen=summary.records_seen,
                     records_inserted=summary.raw_payloads,
                     records_failed=summary.errors,
+                    symbols_new=summary.symbols_inserted,
+                    symbols_delisted=summary.deactivated,
                     error_message=summary.error_message,
                 )
                 return summary
@@ -90,6 +92,8 @@ class MassiveSymbolSyncJob:
                 records_seen=summary.records_seen,
                 records_inserted=summary.raw_payloads,
                 records_failed=summary.errors,
+                symbols_new=summary.symbols_inserted,
+                symbols_delisted=summary.deactivated,
             )
         log.info("sync finished  %s", summary.format_line())
         return summary
