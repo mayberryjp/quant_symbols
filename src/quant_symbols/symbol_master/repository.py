@@ -631,18 +631,33 @@ class SymbolMasterRepository:
         candidate: SymbolCandidate,
         counts: dict[str, int],
     ) -> None:
-        row = self.connection.execute(
-            _text(
-                """
-                SELECT id, symbol_id, active FROM symbol_master.symbol_vendor_ids
-                WHERE vendor_source_id = :vendor_source_id
-                  AND lower(vendor_symbol) = lower(:vendor_symbol)
-                ORDER BY active DESC, id ASC
-                LIMIT 1
-                """
-            ),
-            {"vendor_source_id": vendor_source_id, "vendor_symbol": candidate.source_ticker},
-        ).mappings().first()
+        row = None
+        if candidate.composite_figi:
+            row = self.connection.execute(
+                _text(
+                    """
+                    SELECT id, symbol_id, vendor_symbol, active FROM symbol_master.symbol_vendor_ids
+                    WHERE vendor_source_id = :vendor_source_id
+                      AND vendor_asset_id = :vendor_asset_id
+                    ORDER BY active DESC, id ASC
+                    LIMIT 1
+                    """
+                ),
+                {"vendor_source_id": vendor_source_id, "vendor_asset_id": candidate.composite_figi},
+            ).mappings().first()
+        if row is None:
+            row = self.connection.execute(
+                _text(
+                    """
+                    SELECT id, symbol_id, vendor_symbol, active FROM symbol_master.symbol_vendor_ids
+                    WHERE vendor_source_id = :vendor_source_id
+                      AND lower(vendor_symbol) = lower(:vendor_symbol)
+                    ORDER BY active DESC, id ASC
+                    LIMIT 1
+                    """
+                ),
+                {"vendor_source_id": vendor_source_id, "vendor_symbol": candidate.source_ticker},
+            ).mappings().first()
         if row is None:
             self.connection.execute(
                 _text(
@@ -667,12 +682,17 @@ class SymbolMasterRepository:
             )
             _increment(counts, "vendor_ids_inserted")
             return
-        changed = row["symbol_id"] != symbol_id or row["active"] != candidate.active
+        changed = (
+            row["symbol_id"] != symbol_id
+            or row["vendor_symbol"] != candidate.source_ticker
+            or row["active"] != candidate.active
+        )
         self.connection.execute(
             _text(
                 """
                 UPDATE symbol_master.symbol_vendor_ids
                 SET symbol_id = :symbol_id,
+                    vendor_symbol = :vendor_symbol,
                     vendor_asset_id = :vendor_asset_id,
                     last_seen_run_id = :run_id,
                     last_seen_payload_id = :payload_id,
@@ -684,6 +704,7 @@ class SymbolMasterRepository:
             {
                 "id": row["id"],
                 "symbol_id": symbol_id,
+                "vendor_symbol": candidate.source_ticker,
                 "vendor_asset_id": candidate.composite_figi,
                 "run_id": run_id,
                 "payload_id": raw_payload_id,
