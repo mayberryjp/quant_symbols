@@ -47,6 +47,15 @@ class SymbolRecentParams:
     offset: int = 0
 
 
+@dataclass(frozen=True)
+class SymbolDelistedParams:
+    days: int = 7
+    market: str | None = None
+    locale: str | None = None
+    limit: int = 100
+    offset: int = 0
+
+
 def list_symbols(params: SymbolListParams) -> dict[str, Any]:
     from sqlalchemy import create_engine, text
 
@@ -238,7 +247,7 @@ def list_recent_symbols(params: SymbolRecentParams) -> dict[str, Any]:
     if not database_url:
         raise RuntimeError("DATABASE_URL is not configured")
 
-    where = _recent_where_clause(params)
+    where = _window_where_clause(params)
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
         with engine.connect() as connection:
@@ -268,7 +277,7 @@ def list_recent_symbols(params: SymbolRecentParams) -> dict[str, Any]:
                     LIMIT :limit OFFSET :offset
                     """
                 ),
-                _recent_query_values(params),
+                _window_query_values(params),
             ).mappings().all()
     finally:
         engine.dispose()
@@ -277,6 +286,64 @@ def list_recent_symbols(params: SymbolRecentParams) -> dict[str, Any]:
     for row in rows:
         item = _row_to_item(row)
         item["created_at"] = row["created_at"].isoformat() if row["created_at"] else None
+        items.append(item)
+    return {
+        "items": items,
+        "days": params.days,
+        "limit": params.limit,
+        "offset": params.offset,
+        "count": len(items),
+    }
+
+
+def list_delisted_symbols(params: SymbolDelistedParams) -> dict[str, Any]:
+    """List symbols delisted within the last ``params.days`` days."""
+    from sqlalchemy import create_engine, text
+
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+
+    where = _window_where_clause(params)
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    f"""
+                    SELECT
+                        s.id,
+                        s.canonical_ticker,
+                        s.name,
+                        s.market,
+                        s.locale,
+                        s.currency,
+                        s.asset_class,
+                        s.security_type,
+                        s.active,
+                        s.delisted_at,
+                        e.id AS exchange_id,
+                        e.mic AS exchange_mic,
+                        e.name AS exchange_name
+                    FROM symbol_master.symbols s
+                    LEFT JOIN symbol_master.exchanges e
+                        ON e.id = s.primary_exchange_id
+                    WHERE s.delisted_at IS NOT NULL
+                      AND s.delisted_at >= now() - (:days::int * interval '1 day')
+                    {where}
+                    ORDER BY s.delisted_at DESC, s.id DESC
+                    LIMIT :limit OFFSET :offset
+                    """
+                ),
+                _window_query_values(params),
+            ).mappings().all()
+    finally:
+        engine.dispose()
+
+    items = []
+    for row in rows:
+        item = _row_to_item(row)
+        item["delisted_at"] = row["delisted_at"].isoformat() if row["delisted_at"] else None
         items.append(item)
     return {
         "items": items,
@@ -451,7 +518,7 @@ def _history_query_values(params: SymbolHistoryParams) -> dict[str, Any]:
     return values
 
 
-def _recent_where_clause(params: SymbolRecentParams) -> str:
+def _window_where_clause(params: SymbolRecentParams | SymbolDelistedParams) -> str:
     predicates = []
     if params.market is not None:
         predicates.append("s.market = :market")
@@ -462,7 +529,7 @@ def _recent_where_clause(params: SymbolRecentParams) -> str:
     return "AND " + " AND ".join(predicates)
 
 
-def _recent_query_values(params: SymbolRecentParams) -> dict[str, Any]:
+def _window_query_values(params: SymbolRecentParams | SymbolDelistedParams) -> dict[str, Any]:
     values: dict[str, Any] = {
         "days": params.days,
         "limit": params.limit,

@@ -9,6 +9,7 @@ from quant_symbols.api.testing import TestClient
 from quant_symbols.api.app import create_app
 from quant_symbols.api.symbols import (
     SymbolCountParams,
+    SymbolDelistedParams,
     SymbolHistoryParams,
     SymbolListParams,
     SymbolRecentParams,
@@ -506,6 +507,123 @@ def test_list_recent_symbols_builds_window_query_and_includes_created_at(monkeyp
     assert "ORDER BY s.created_at DESC" in statement
     assert "s.market = :market" in statement
     assert calls[0]["values"] == {"days": 14, "market": "stocks", "limit": 50, "offset": 5}
+
+
+def test_symbols_delisted_route_passes_params_and_returns_items():
+    seen: list[SymbolDelistedParams] = []
+
+    def fake_delisted(params: SymbolDelistedParams) -> dict[str, object]:
+        seen.append(params)
+        return {
+            "items": [
+                {
+                    "id": 9,
+                    "canonical_ticker": "SBNY",
+                    "name": "Signature Bank",
+                    "market": "stocks",
+                    "locale": "us",
+                    "currency": "USD",
+                    "asset_class": "equity",
+                    "security_type": "common_stock",
+                    "active": False,
+                    "primary_exchange": None,
+                    "delisted_at": "2026-07-05T00:00:00+00:00",
+                }
+            ],
+            "days": params.days,
+            "limit": params.limit,
+            "offset": params.offset,
+            "count": 1,
+        }
+
+    client = TestClient(create_app(symbol_delisted=fake_delisted))
+
+    response = client.get("/symbols/delisted?days=30&market=stocks&limit=25&offset=10")
+
+    assert response.status_code == 200
+    assert seen == [
+        SymbolDelistedParams(days=30, market="stocks", locale=None, limit=25, offset=10)
+    ]
+    body = response.json()
+    assert body["count"] == 1
+    assert body["days"] == 30
+    assert body["items"][0]["delisted_at"] == "2026-07-05T00:00:00+00:00"
+
+
+def test_symbols_delisted_defaults_days_to_seven():
+    seen: list[SymbolDelistedParams] = []
+
+    def fake_delisted(params: SymbolDelistedParams) -> dict[str, object]:
+        seen.append(params)
+        return {
+            "items": [],
+            "days": params.days,
+            "limit": params.limit,
+            "offset": params.offset,
+            "count": 0,
+        }
+
+    client = TestClient(create_app(symbol_delisted=fake_delisted))
+
+    response = client.get("/symbols/delisted")
+
+    assert response.status_code == 200
+    assert seen == [SymbolDelistedParams(days=7, market=None, locale=None, limit=100, offset=0)]
+
+
+def test_symbols_delisted_rejects_invalid_days():
+    def fail(_params: SymbolDelistedParams) -> dict[str, object]:
+        raise AssertionError("delisted should not be called for invalid days")
+
+    client = TestClient(create_app(symbol_delisted=fail))
+
+    response = client.get("/symbols/delisted?days=0")
+
+    assert response.status_code == 422
+
+
+def test_list_delisted_symbols_builds_window_query_and_includes_delisted_at(monkeypatch):
+    from datetime import datetime, timezone
+
+    from quant_symbols.api.symbols import list_delisted_symbols
+
+    calls: list[dict[str, object]] = []
+    rows = [
+        {
+            "id": 9,
+            "canonical_ticker": "SBNY",
+            "name": "Signature Bank",
+            "market": "stocks",
+            "locale": "us",
+            "currency": "USD",
+            "asset_class": "equity",
+            "security_type": "common_stock",
+            "active": False,
+            "delisted_at": datetime(2026, 7, 5, 0, 0, 0, tzinfo=timezone.utc),
+            "exchange_id": None,
+            "exchange_mic": None,
+            "exchange_name": None,
+        }
+    ]
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:pass@db/quant")
+    import sqlalchemy
+
+    monkeypatch.setattr(sqlalchemy, "create_engine", lambda *a, **k: _fake_mapping_engine(rows, calls))
+
+    result = list_delisted_symbols(SymbolDelistedParams(days=30, market="stocks", limit=25, offset=10))
+
+    assert result["days"] == 30
+    assert result["count"] == 1
+    assert result["items"][0]["canonical_ticker"] == "SBNY"
+    assert result["items"][0]["delisted_at"] == "2026-07-05T00:00:00+00:00"
+    assert result["items"][0]["primary_exchange"] is None
+    statement = str(calls[0]["statement"])
+    assert "s.delisted_at IS NOT NULL" in statement
+    assert "now() - (:days::int * interval '1 day')" in statement
+    assert "ORDER BY s.delisted_at DESC" in statement
+    assert "s.market = :market" in statement
+    assert calls[0]["values"] == {"days": 30, "market": "stocks", "limit": 25, "offset": 10}
 
 
 def test_symbols_primary_exchange_may_be_null():

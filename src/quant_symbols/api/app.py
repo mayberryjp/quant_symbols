@@ -15,6 +15,7 @@ from quant_symbols.api.readiness import (
 )
 from quant_symbols.api.symbols import (
     SymbolCountParams,
+    SymbolDelistedParams,
     SymbolHistoryParams,
     SymbolListParams,
     SymbolRecentParams,
@@ -23,6 +24,7 @@ from quant_symbols.api.symbols import (
     get_symbol_by_id,
     get_symbol_by_ticker,
     get_symbol_count_history,
+    list_delisted_symbols,
     list_recent_symbols,
     list_symbols,
 )
@@ -54,6 +56,7 @@ SymbolList = Callable[[SymbolListParams], Dict[str, Any]]
 SymbolCount = Callable[[SymbolCountParams], Dict[str, Any]]
 SymbolCountHistory = Callable[[SymbolHistoryParams], Dict[str, Any]]
 SymbolRecent = Callable[[SymbolRecentParams], Dict[str, Any]]
+SymbolDelisted = Callable[[SymbolDelistedParams], Dict[str, Any]]
 SymbolDetail = Callable[[int], Optional[Dict[str, Any]]]
 SymbolByTicker = Callable[[SymbolTickerLookupParams], Optional[Dict[str, Any]]]
 SymbolAliases = Callable[[int], Optional[Dict[str, Any]]]
@@ -148,6 +151,7 @@ def create_app(
     symbol_count: SymbolCount = count_symbols,
     symbol_count_history: SymbolCountHistory = get_symbol_count_history,
     symbol_recent: SymbolRecent = list_recent_symbols,
+    symbol_delisted: SymbolDelisted = list_delisted_symbols,
     symbol_detail: SymbolDetail = get_symbol_by_id,
     symbol_by_ticker: SymbolByTicker = get_symbol_by_ticker,
     symbol_aliases: SymbolAliases = list_symbol_aliases,
@@ -273,6 +277,26 @@ def create_app(
         )
         try:
             return symbol_recent(params)
+        except Exception as exc:
+            return _server_error(exc)
+
+    @api.get("/symbols/delisted")
+    def symbol_delisted_route() -> dict:
+        try:
+            days = _int_param(request.query.get("days"), default=7, ge=1, le=3650)
+            limit = _int_param(request.query.get("limit"), default=100, ge=1, le=500)
+            offset = _int_param(request.query.get("offset"), default=0, ge=0)
+        except _ValidationError:
+            return _validation_error_response()
+        params = SymbolDelistedParams(
+            days=days,
+            market=request.query.get("market") or None,
+            locale=request.query.get("locale") or None,
+            limit=limit,
+            offset=offset,
+        )
+        try:
+            return symbol_delisted(params)
         except Exception as exc:
             return _server_error(exc)
 
