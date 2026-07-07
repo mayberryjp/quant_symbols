@@ -15,11 +15,15 @@ from quant_symbols.api.readiness import (
 )
 from quant_symbols.api.symbols import (
     SymbolCountParams,
+    SymbolHistoryParams,
     SymbolListParams,
+    SymbolRecentParams,
     SymbolTickerLookupParams,
     count_symbols,
     get_symbol_by_id,
     get_symbol_by_ticker,
+    get_symbol_count_history,
+    list_recent_symbols,
     list_symbols,
 )
 from quant_symbols.api.sync_status import (
@@ -48,6 +52,8 @@ log = logging.getLogger(SERVICE_NAME)
 ReadinessCheck = Callable[[], Union[ReadinessStatus, Dict[str, Any]]]
 SymbolList = Callable[[SymbolListParams], Dict[str, Any]]
 SymbolCount = Callable[[SymbolCountParams], Dict[str, Any]]
+SymbolCountHistory = Callable[[SymbolHistoryParams], Dict[str, Any]]
+SymbolRecent = Callable[[SymbolRecentParams], Dict[str, Any]]
 SymbolDetail = Callable[[int], Optional[Dict[str, Any]]]
 SymbolByTicker = Callable[[SymbolTickerLookupParams], Optional[Dict[str, Any]]]
 SymbolAliases = Callable[[int], Optional[Dict[str, Any]]]
@@ -140,6 +146,8 @@ def create_app(
     readiness_check: ReadinessCheck = check_database_readiness,
     symbol_list: SymbolList = list_symbols,
     symbol_count: SymbolCount = count_symbols,
+    symbol_count_history: SymbolCountHistory = get_symbol_count_history,
+    symbol_recent: SymbolRecent = list_recent_symbols,
     symbol_detail: SymbolDetail = get_symbol_by_id,
     symbol_by_ticker: SymbolByTicker = get_symbol_by_ticker,
     symbol_aliases: SymbolAliases = list_symbol_aliases,
@@ -228,6 +236,43 @@ def create_app(
         )
         try:
             return symbol_count(params)
+        except Exception as exc:
+            return _server_error(exc)
+
+    @api.get("/symbols/count/history")
+    def symbol_count_history_route() -> dict:
+        raw_days = request.query.get("days")
+        try:
+            days = None if raw_days in (None, "") else _int_param(raw_days, default=1, ge=1, le=3650)
+        except _ValidationError:
+            return _validation_error_response("days must be an integer between 1 and 3650")
+        params = SymbolHistoryParams(
+            days=days,
+            market=request.query.get("market") or None,
+            locale=request.query.get("locale") or None,
+        )
+        try:
+            return symbol_count_history(params)
+        except Exception as exc:
+            return _server_error(exc)
+
+    @api.get("/symbols/recent")
+    def symbol_recent_route() -> dict:
+        try:
+            days = _int_param(request.query.get("days"), default=7, ge=1, le=3650)
+            limit = _int_param(request.query.get("limit"), default=100, ge=1, le=500)
+            offset = _int_param(request.query.get("offset"), default=0, ge=0)
+        except _ValidationError:
+            return _validation_error_response()
+        params = SymbolRecentParams(
+            days=days,
+            market=request.query.get("market") or None,
+            locale=request.query.get("locale") or None,
+            limit=limit,
+            offset=offset,
+        )
+        try:
+            return symbol_recent(params)
         except Exception as exc:
             return _server_error(exc)
 

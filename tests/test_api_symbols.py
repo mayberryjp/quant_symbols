@@ -7,7 +7,13 @@ import sys
 from quant_symbols.api.testing import TestClient
 
 from quant_symbols.api.app import create_app
-from quant_symbols.api.symbols import SymbolCountParams, SymbolListParams, count_symbols
+from quant_symbols.api.symbols import (
+    SymbolCountParams,
+    SymbolHistoryParams,
+    SymbolListParams,
+    SymbolRecentParams,
+    count_symbols,
+)
 
 
 def test_symbols_route_returns_list_from_injected_repository():
@@ -253,6 +259,253 @@ def test_symbols_count_route_rejects_pagination_params():
 
     assert response.status_code == 422
     assert response.json() == {"detail": "limit and offset are not supported for symbol counts"}
+
+
+def _fake_mapping_engine(rows: list[dict[str, object]], calls: list[dict[str, object]]):
+    class FakeResult:
+        def mappings(self) -> "FakeResult":
+            return self
+
+        def all(self) -> list[dict[str, object]]:
+            return rows
+
+    class FakeConnection:
+        def __enter__(self) -> "FakeConnection":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def execute(self, statement: object, values: dict[str, object]) -> FakeResult:
+            calls.append({"statement": str(statement), "values": values})
+            return FakeResult()
+
+    class FakeEngine:
+        def connect(self) -> FakeConnection:
+            return FakeConnection()
+
+        def dispose(self) -> None:
+            calls.append({"disposed": True})
+
+    return FakeEngine()
+
+
+def test_symbols_count_history_route_passes_params_and_returns_points():
+    seen: list[SymbolHistoryParams] = []
+
+    def fake_history(params: SymbolHistoryParams) -> dict[str, object]:
+        seen.append(params)
+        return {
+            "bucket": "day",
+            "filters": {"days": params.days, "market": params.market, "locale": params.locale},
+            "points": [
+                {"date": "2026-06-01", "total_symbols": 100, "new_symbols": 10, "delisted_symbols": 2},
+            ],
+        }
+
+    client = TestClient(create_app(symbol_count_history=fake_history))
+
+    response = client.get("/symbols/count/history?days=30&market=stocks&locale=us")
+
+    assert response.status_code == 200
+    assert seen == [SymbolHistoryParams(days=30, market="stocks", locale="us")]
+    body = response.json()
+    assert body["bucket"] == "day"
+    assert body["points"] == [
+        {"date": "2026-06-01", "total_symbols": 100, "new_symbols": 10, "delisted_symbols": 2}
+    ]
+
+
+def test_symbols_count_history_defaults_to_full_history_when_days_omitted():
+    seen: list[SymbolHistoryParams] = []
+
+    def fake_history(params: SymbolHistoryParams) -> dict[str, object]:
+        seen.append(params)
+        return {"bucket": "day", "filters": {"days": params.days}, "points": []}
+
+    client = TestClient(create_app(symbol_count_history=fake_history))
+
+    response = client.get("/symbols/count/history")
+
+    assert response.status_code == 200
+    assert seen == [SymbolHistoryParams(days=None, market=None, locale=None)]
+
+
+def test_symbols_count_history_rejects_invalid_days():
+    def fail(_params: SymbolHistoryParams) -> dict[str, object]:
+        raise AssertionError("history should not be called for invalid days")
+
+    client = TestClient(create_app(symbol_count_history=fail))
+
+    response = client.get("/symbols/count/history?days=0")
+
+    assert response.status_code == 422
+
+
+def test_symbols_recent_route_passes_params_and_returns_items():
+    seen: list[SymbolRecentParams] = []
+
+    def fake_recent(params: SymbolRecentParams) -> dict[str, object]:
+        seen.append(params)
+        return {
+            "items": [
+                {
+                    "id": 5,
+                    "canonical_ticker": "NEWCO",
+                    "name": "New Co",
+                    "market": "stocks",
+                    "locale": "us",
+                    "currency": "USD",
+                    "asset_class": "equity",
+                    "security_type": "common_stock",
+                    "active": True,
+                    "primary_exchange": None,
+                    "created_at": "2026-07-06T12:00:00+00:00",
+                }
+            ],
+            "days": params.days,
+            "limit": params.limit,
+            "offset": params.offset,
+            "count": 1,
+        }
+
+    client = TestClient(create_app(symbol_recent=fake_recent))
+
+    response = client.get("/symbols/recent?days=14&market=stocks&limit=50&offset=5")
+
+    assert response.status_code == 200
+    assert seen == [
+        SymbolRecentParams(days=14, market="stocks", locale=None, limit=50, offset=5)
+    ]
+    body = response.json()
+    assert body["count"] == 1
+    assert body["days"] == 14
+    assert body["items"][0]["created_at"] == "2026-07-06T12:00:00+00:00"
+
+
+def test_symbols_recent_defaults_days_to_seven():
+    seen: list[SymbolRecentParams] = []
+
+    def fake_recent(params: SymbolRecentParams) -> dict[str, object]:
+        seen.append(params)
+        return {
+            "items": [],
+            "days": params.days,
+            "limit": params.limit,
+            "offset": params.offset,
+            "count": 0,
+        }
+
+    client = TestClient(create_app(symbol_recent=fake_recent))
+
+    response = client.get("/symbols/recent")
+
+    assert response.status_code == 200
+    assert seen == [SymbolRecentParams(days=7, market=None, locale=None, limit=100, offset=0)]
+
+
+def test_symbols_recent_rejects_invalid_days():
+    def fail(_params: SymbolRecentParams) -> dict[str, object]:
+        raise AssertionError("recent should not be called for invalid days")
+
+    client = TestClient(create_app(symbol_recent=fail))
+
+    response = client.get("/symbols/recent?days=-1")
+
+    assert response.status_code == 422
+
+
+def test_get_symbol_count_history_builds_windowed_series_query(monkeypatch):
+    from datetime import date
+
+    from quant_symbols.api.symbols import get_symbol_count_history
+
+    calls: list[dict[str, object]] = []
+    rows = [
+        {"bucket_date": date(2026, 6, 1), "new_symbols": 10, "delisted_symbols": 1, "total_symbols": 100},
+        {"bucket_date": date(2026, 6, 2), "new_symbols": 5, "delisted_symbols": 0, "total_symbols": 105},
+    ]
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:pass@db/quant")
+    import sqlalchemy
+
+    monkeypatch.setattr(sqlalchemy, "create_engine", lambda *a, **k: _fake_mapping_engine(rows, calls))
+
+    result = get_symbol_count_history(SymbolHistoryParams(days=30, market="stocks", locale="us"))
+
+    assert result["bucket"] == "day"
+    assert result["filters"] == {"days": 30, "market": "stocks", "locale": "us"}
+    assert result["points"] == [
+        {"date": "2026-06-01", "total_symbols": 100, "new_symbols": 10, "delisted_symbols": 1},
+        {"date": "2026-06-02", "total_symbols": 105, "new_symbols": 5, "delisted_symbols": 0},
+    ]
+    statement = str(calls[0]["statement"])
+    assert "generate_series" in statement
+    assert "s.market = :market" in statement
+    assert "s.locale = :locale" in statement
+    assert calls[0]["values"] == {"days": 30, "market": "stocks", "locale": "us"}
+
+
+def test_get_symbol_count_history_without_days_or_filters(monkeypatch):
+    from quant_symbols.api.symbols import get_symbol_count_history
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:pass@db/quant")
+    import sqlalchemy
+
+    monkeypatch.setattr(sqlalchemy, "create_engine", lambda *a, **k: _fake_mapping_engine([], calls))
+
+    result = get_symbol_count_history(SymbolHistoryParams())
+
+    assert result["points"] == []
+    assert result["filters"] == {"days": None, "market": None, "locale": None}
+    statement = str(calls[0]["statement"])
+    assert "s.market = :market" not in statement
+    assert "s.locale = :locale" not in statement
+    assert calls[0]["values"] == {"days": None}
+
+
+def test_list_recent_symbols_builds_window_query_and_includes_created_at(monkeypatch):
+    from datetime import datetime, timezone
+
+    from quant_symbols.api.symbols import list_recent_symbols
+
+    calls: list[dict[str, object]] = []
+    rows = [
+        {
+            "id": 5,
+            "canonical_ticker": "NEWCO",
+            "name": "New Co",
+            "market": "stocks",
+            "locale": "us",
+            "currency": "USD",
+            "asset_class": "equity",
+            "security_type": "common_stock",
+            "active": True,
+            "created_at": datetime(2026, 7, 6, 12, 0, 0, tzinfo=timezone.utc),
+            "exchange_id": None,
+            "exchange_mic": None,
+            "exchange_name": None,
+        }
+    ]
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:pass@db/quant")
+    import sqlalchemy
+
+    monkeypatch.setattr(sqlalchemy, "create_engine", lambda *a, **k: _fake_mapping_engine(rows, calls))
+
+    result = list_recent_symbols(SymbolRecentParams(days=14, market="stocks", limit=50, offset=5))
+
+    assert result["days"] == 14
+    assert result["count"] == 1
+    assert result["items"][0]["canonical_ticker"] == "NEWCO"
+    assert result["items"][0]["created_at"] == "2026-07-06T12:00:00+00:00"
+    assert result["items"][0]["primary_exchange"] is None
+    statement = str(calls[0]["statement"])
+    assert "now() - (:days::int * interval '1 day')" in statement
+    assert "ORDER BY s.created_at DESC" in statement
+    assert "s.market = :market" in statement
+    assert calls[0]["values"] == {"days": 14, "market": "stocks", "limit": 50, "offset": 5}
 
 
 def test_symbols_primary_exchange_may_be_null():
