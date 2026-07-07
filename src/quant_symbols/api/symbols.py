@@ -173,9 +173,9 @@ def get_symbol_count_history(params: SymbolHistoryParams) -> dict[str, Any]:
                     bounds AS (
                         SELECT
                             CASE
-                                WHEN :days::int IS NULL
+                                WHEN CAST(:days AS int) IS NULL
                                     THEN (SELECT min(created_at)::date FROM filtered)
-                                ELSE (current_date - ((:days::int - 1) * interval '1 day'))::date
+                                ELSE (current_date - ((CAST(:days AS int) - 1) * interval '1 day'))::date
                             END AS start_date,
                             current_date AS end_date
                     ),
@@ -271,7 +271,7 @@ def list_recent_symbols(params: SymbolRecentParams) -> dict[str, Any]:
                     FROM symbol_master.symbols s
                     LEFT JOIN symbol_master.exchanges e
                         ON e.id = s.primary_exchange_id
-                    WHERE s.created_at >= now() - (:days::int * interval '1 day')
+                    WHERE s.created_at >= now() - (CAST(:days AS int) * interval '1 day')
                     {where}
                     ORDER BY s.created_at DESC, s.id DESC
                     LIMIT :limit OFFSET :offset
@@ -329,7 +329,7 @@ def list_delisted_symbols(params: SymbolDelistedParams) -> dict[str, Any]:
                     LEFT JOIN symbol_master.exchanges e
                         ON e.id = s.primary_exchange_id
                     WHERE s.delisted_at IS NOT NULL
-                      AND s.delisted_at >= now() - (:days::int * interval '1 day')
+                      AND s.delisted_at >= now() - (CAST(:days AS int) * interval '1 day')
                     {where}
                     ORDER BY s.delisted_at DESC, s.id DESC
                     LIMIT :limit OFFSET :offset

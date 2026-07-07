@@ -503,7 +503,7 @@ def test_list_recent_symbols_builds_window_query_and_includes_created_at(monkeyp
     assert result["items"][0]["created_at"] == "2026-07-06T12:00:00+00:00"
     assert result["items"][0]["primary_exchange"] is None
     statement = str(calls[0]["statement"])
-    assert "now() - (:days::int * interval '1 day')" in statement
+    assert "now() - (CAST(:days AS int) * interval '1 day')" in statement
     assert "ORDER BY s.created_at DESC" in statement
     assert "s.market = :market" in statement
     assert calls[0]["values"] == {"days": 14, "market": "stocks", "limit": 50, "offset": 5}
@@ -620,7 +620,7 @@ def test_list_delisted_symbols_builds_window_query_and_includes_delisted_at(monk
     assert result["items"][0]["primary_exchange"] is None
     statement = str(calls[0]["statement"])
     assert "s.delisted_at IS NOT NULL" in statement
-    assert "now() - (:days::int * interval '1 day')" in statement
+    assert "now() - (CAST(:days AS int) * interval '1 day')" in statement
     assert "ORDER BY s.delisted_at DESC" in statement
     assert "s.market = :market" in statement
     assert calls[0]["values"] == {"days": 30, "market": "stocks", "limit": 25, "offset": 10}
