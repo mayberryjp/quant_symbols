@@ -186,6 +186,18 @@ def create_app(
                 request.method, request.path, response.status_code, duration_ms,
             )
 
+    # -- CORS: allow any origin ------------------------------------------
+
+    @api.hook("after_request")
+    def _cors_headers() -> None:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+
+    @api.route("/<path:path>", method="OPTIONS")
+    def _cors_preflight(path: str = "") -> str:
+        return ""
+
     # -- health / readiness ---------------------------------------------
 
     @api.get("/health")
