@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import requests
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -22,6 +23,35 @@ class TransportResponse:
 class Transport(Protocol):
     def request(self, method: str, url: str, *, headers: dict[str, str], timeout: float) -> TransportResponse:
         """Execute one HTTP request."""
+
+
+class RequestsSession(Protocol):
+    def request(self, method: str, url: str, *, headers: dict[str, str], timeout: float) -> requests.Response:
+        """Execute one request using a requests-compatible session."""
+
+
+class RequestsSessionTransport:
+    """HTTP transport backed by a persistent requests session.
+
+    A single session keeps a connection pool, so repeated REST calls to the
+    same host can reuse keep-alive TCP/TLS connections.
+    """
+
+    def __init__(self, session: RequestsSession | None = None) -> None:
+        self._session = session or requests.Session()
+
+    def request(self, method: str, url: str, *, headers: dict[str, str], timeout: float) -> TransportResponse:
+        try:
+            response = self._session.request(method, url, headers=headers, timeout=timeout)
+            return TransportResponse(
+                status_code=response.status_code,
+                headers=dict(response.headers.items()),
+                body=response.content,
+            )
+        except requests.Timeout as exc:
+            raise MassiveTimeoutError("Massive/Polygon request timed out") from exc
+        except requests.RequestException as exc:
+            raise MassiveTransportError(f"Massive/Polygon transport error: {exc}") from exc
 
 
 class UrllibTransport:

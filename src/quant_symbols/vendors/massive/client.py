@@ -16,7 +16,7 @@ from quant_symbols.vendors.massive.errors import (
     MassiveServerError,
 )
 from quant_symbols.vendors.massive.models import RawVendorPayload, TickerReferencePage
-from quant_symbols.vendors.massive.transport import Transport, UrllibTransport, decode_json_body
+from quant_symbols.vendors.massive.transport import RequestsSessionTransport, Transport, decode_json_body
 
 
 SleepFunc = Callable[[float], None]
@@ -39,7 +39,7 @@ class MassiveClient:
         sleep: SleepFunc | None = None,
     ) -> None:
         self.config = config
-        self._transport = transport or UrllibTransport()
+        self._transport = transport or RequestsSessionTransport()
         self._sleep = sleep or time.sleep
 
     @classmethod
