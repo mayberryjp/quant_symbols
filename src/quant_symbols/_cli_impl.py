@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, time, timedelta
 import logging
 import os
 from pathlib import Path
@@ -114,6 +115,22 @@ def _parse_active(value: str) -> bool | None:
     raise argparse.ArgumentTypeError("--active must be true, false, or all")
 
 
+def _parse_schedule_time(value: str) -> time:
+    try:
+        parsed = datetime.strptime(value, "%H:%M").time()
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("time must use 24-hour HH:MM format") from exc
+    return parsed
+
+
+def _seconds_until_daily_time(target: time, *, now: datetime | None = None) -> float:
+    current = now or datetime.now()
+    next_run = datetime.combine(current.date(), target)
+    if next_run <= current:
+        next_run += timedelta(days=1)
+    return (next_run - current).total_seconds()
+
+
 def symbols_sync(args: argparse.Namespace) -> None:
     from quant_symbols.symbol_master.massive_sync import MassiveSymbolSyncJob, SyncOptions
     from quant_symbols.vendors.massive.errors import (
@@ -133,10 +150,20 @@ def symbols_sync(args: argparse.Namespace) -> None:
     )
 
     interval = getattr(args, "schedule", None)
-    run_once = interval is None
+    schedule_at = getattr(args, "schedule_at", None)
+    run_once = interval is None and schedule_at is None
 
     import time as _time
     while True:
+        if schedule_at is not None:
+            sleep_seconds = _seconds_until_daily_time(schedule_at)
+            logging.getLogger(__name__).info(
+                "next sync at %s in %d seconds",
+                schedule_at.strftime("%H:%M"),
+                int(sleep_seconds),
+            )
+            _time.sleep(sleep_seconds)
+
         engine = None if args.dry_run else _engine()
         job = MassiveSymbolSyncJob(engine=engine)
         try:
@@ -184,8 +211,9 @@ def symbols_sync(args: argparse.Namespace) -> None:
         if run_once:
             break
 
-        logging.getLogger(__name__).info("next sync in %d seconds", interval)
-        _time.sleep(interval)
+        if interval is not None:
+            logging.getLogger(__name__).info("next sync in %d seconds", interval)
+            _time.sleep(interval)
 
 
 def symbols_sync_summary(args: argparse.Namespace) -> None:
@@ -246,8 +274,11 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("--market", default="stocks")
     sync_parser.add_argument("--locale", default="us")
     sync_parser.add_argument("--limit", type=int, default=1000)
-    sync_parser.add_argument("--schedule", type=int, metavar="SECONDS",
-                             help="Run continuously, sleeping SECONDS between syncs (e.g. 86400 for daily)")
+    sync_schedule_group = sync_parser.add_mutually_exclusive_group()
+    sync_schedule_group.add_argument("--schedule", type=int, metavar="SECONDS",
+                                     help="Run continuously, sleeping SECONDS between syncs (e.g. 86400 for daily)")
+    sync_schedule_group.add_argument("--schedule-at", type=_parse_schedule_time, metavar="HH:MM",
+                                     help="Run daily at HH:MM in the container's local time")
     sync_parser.set_defaults(func=symbols_sync)
 
     summary_parser = symbols_subparsers.add_parser("sync-summary")

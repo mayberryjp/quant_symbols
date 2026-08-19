@@ -13,3 +13,7 @@ services:
       MASSIVE_RETRY_COUNT: 3
       MASSIVE_BACKOFF_SECONDS: 0.5
       MASSIVE_BACKOFF_MULTIPLIER: 2
+      # Set to HH:MM for a daily fixed-time sync in the container's local time.
+      # Leave empty to use SYNC_INTERVAL instead.
+      SYNC_TIME:
+      SYNC_INTERVAL: 86400

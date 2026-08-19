@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, time
 from pathlib import Path
 
+import pytest
+
+import quant_symbols._cli_impl as cli_impl
 from quant_symbols.cli import build_parser
 from quant_symbols.symbol_master.fixtures import load_massive_fixture_pages
 from quant_symbols.symbol_master.massive_sync import MassiveSymbolSyncJob, SyncOptions
@@ -15,6 +19,32 @@ def test_cli_exposes_symbol_sync_commands() -> None:
 
     assert parser.parse_args(["symbols", "sync", "--fixture", str(FIXTURES), "--dry-run"]).func.__name__ == "symbols_sync"
     assert parser.parse_args(["symbols", "sync-summary", "--latest"]).func.__name__ == "symbols_sync_summary"
+
+
+def test_cli_exposes_fixed_time_symbol_sync_schedule() -> None:
+    parser = build_parser()
+
+    parsed = parser.parse_args(["symbols", "sync", "--schedule-at", "02:30"])
+
+    assert parsed.schedule_at == time(2, 30)
+
+
+def test_cli_rejects_conflicting_symbol_sync_schedules() -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["symbols", "sync", "--schedule", "60", "--schedule-at", "02:30"])
+
+
+def test_seconds_until_daily_time_uses_next_occurrence() -> None:
+    assert cli_impl._seconds_until_daily_time(
+        time(2, 30),
+        now=datetime(2026, 8, 19, 2, 0),
+    ) == 1800
+    assert cli_impl._seconds_until_daily_time(
+        time(2, 30),
+        now=datetime(2026, 8, 19, 3, 0),
+    ) == 84600
 
 
 def test_fixture_loader_builds_deterministic_page() -> None:

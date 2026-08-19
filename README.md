@@ -224,3 +224,7 @@ python3 -m quant_symbols.cli symbols sync-summary --latest
 
 Live sync uses `MASSIVE_API_KEY` through `MassiveClient.from_env()` and supports
 `--max-pages`, `--active true|false|all`, `--market`, `--locale`, and `--limit`.
+
+Container scheduling is controlled by environment variables. Set `SYNC_TIME` to
+an `HH:MM` value to run the sync once per day at that time in the container's
+local time. Leave `SYNC_TIME` empty to use `SYNC_INTERVAL` seconds between runs.
