@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from quant_symbols.symbol_master.normalization import (
     MassiveTickerCandidate,
+    SUPPORTED_SECURITY_TYPES,
     map_massive_exchange_candidate,
     map_massive_ticker_raw_record,
 )
@@ -126,9 +127,13 @@ class MassiveRawNormalizeJob:
     ) -> None:
         try:
             candidate = map_massive_ticker_raw_record(row.payload)
-            if not _candidate_has_required_symbol_fields(candidate):
+            if (
+                not _candidate_has_required_symbol_fields(candidate)
+                or candidate.security_type not in SUPPORTED_SECURITY_TYPES
+            ):
                 summary.skipped += 1
-                summary.errors += 1
+                if not _candidate_has_required_symbol_fields(candidate):
+                    summary.errors += 1
                 return
             exchange = map_massive_exchange_candidate(candidate)
             exchange_result = repository.upsert_exchange_candidate(exchange)

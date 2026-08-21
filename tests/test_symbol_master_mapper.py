@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from quant_symbols.symbol_master.massive_mapper import map_ticker_reference
 from quant_symbols.vendors.massive.models import TickerReference
 
@@ -60,6 +62,35 @@ def test_mapper_maps_etf_to_fund_security_type() -> None:
     assert mapped.candidate.security_type == "etf"
 
 
+@pytest.mark.parametrize(
+    ("provider_type", "asset_class", "security_type"),
+    [
+        ("CS", "equity", "common_stock"),
+        ("ETF", "fund", "etf"),
+        ("ADRC", "equity", "adr"),
+        ("ETN", "fund", "etn"),
+        ("FUND", "fund", "fund"),
+    ],
+)
+def test_mapper_imports_supported_security_types(
+    provider_type: str,
+    asset_class: str,
+    security_type: str,
+) -> None:
+    mapped = map_ticker_reference(ref(type=provider_type))
+
+    assert mapped.candidate is not None
+    assert mapped.candidate.asset_class == asset_class
+    assert mapped.candidate.security_type == security_type
+
+
+def test_mapper_skips_preferred_stock() -> None:
+    mapped = map_ticker_reference(ref(type="PFD"))
+
+    assert mapped.candidate is None
+    assert mapped.skipped_reason == "unsupported security type: preferred"
+
+
 def test_mapper_preserves_adr_without_dropping() -> None:
     mapped = map_ticker_reference(ref(ticker="BABA", type="ADRC"))
 
@@ -80,19 +111,16 @@ def test_mapper_allows_missing_name() -> None:
 def test_mapper_warns_for_unknown_exchange_and_type() -> None:
     mapped = map_ticker_reference(ref(primary_exchange="XZZZ", type="MYSTERY"))
 
-    assert mapped.candidate is not None
-    assert mapped.candidate.primary_exchange is not None
-    assert mapped.candidate.primary_exchange.provisional is True
-    assert mapped.candidate.asset_class == "other"
-    assert mapped.candidate.security_type == "other"
-    assert len(mapped.warnings) == 2
+    assert mapped.candidate is None
+    assert mapped.skipped_reason == "unsupported security type: other"
+    assert mapped.warnings == ("unsupported provider security type mapped to other: MYSTERY",)
 
 
 def test_mapper_warns_for_missing_type() -> None:
     mapped = map_ticker_reference(ref(type=None))
 
-    assert mapped.candidate is not None
-    assert mapped.candidate.security_type == "unknown"
+    assert mapped.candidate is None
+    assert mapped.skipped_reason == "unsupported security type: unknown"
     assert mapped.warnings == ("missing provider security type mapped to unknown",)
 
 

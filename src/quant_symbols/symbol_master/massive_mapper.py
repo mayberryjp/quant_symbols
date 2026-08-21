@@ -50,6 +50,15 @@ class MapperResult:
     skipped_reason: str | None = None
 
 
+SUPPORTED_SECURITY_TYPES = {
+    "common_stock",
+    "etf",
+    "adr",
+    "etn",
+    "fund",
+}
+
+
 KNOWN_EXCHANGES = {
     "XNYS": "New York Stock Exchange",
     "XNAS": "Nasdaq Stock Market",
@@ -82,6 +91,12 @@ def map_ticker_reference(reference: TickerReference) -> MapperResult:
     locale = _normalized_text(reference.locale, default="us")
     currency = _currency_code(reference.currency_name, warnings)
     asset_class, security_type = _classification(reference.type, warnings)
+    if security_type not in SUPPORTED_SECURITY_TYPES:
+        return MapperResult(
+            candidate=None,
+            warnings=tuple(warnings),
+            skipped_reason=f"unsupported security type: {security_type}",
+        )
     exchange = _exchange(reference.primary_exchange, warnings)
     delisted_at = _parse_provider_datetime(reference.delisted_utc, "delisted_utc", warnings)
 

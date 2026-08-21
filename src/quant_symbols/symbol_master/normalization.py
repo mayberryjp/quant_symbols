@@ -47,6 +47,15 @@ class MassiveAliasCandidate:
     alias_value: str
 
 
+SUPPORTED_SECURITY_TYPES = {
+    "common_stock",
+    "etf",
+    "adr",
+    "etn",
+    "fund",
+}
+
+
 KNOWN_MASSIVE_EXCHANGES = {
     "XNYS": "New York Stock Exchange",
     "XNAS": "Nasdaq Stock Market",
@@ -133,6 +142,14 @@ def _map_security_type(provider_type: str | None) -> tuple[str, str]:
         return "equity", "common_stock"
     if normalized == "ETF":
         return "fund", "etf"
+    if normalized in {"ADRC", "ADRP", "ADR"}:
+        return "equity", "adr"
+    if normalized in {"ETS", "ETN", "ETV"}:
+        return "fund", "etn"
+    if normalized in {"FUND", "CEF", "OEF"}:
+        return "fund", "fund"
+    if normalized == "PFD":
+        return "equity", "preferred"
     return "unknown", "unknown"
 
 
