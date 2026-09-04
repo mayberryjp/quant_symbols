@@ -53,8 +53,11 @@ def run_migrations_online() -> None:
                 f"ALTER TABLE IF EXISTS public.alembic_version SET SCHEMA {VERSION_TABLE_SCHEMA}"
             )
         )
-        connection.commit()
+        # search_path is set before the commit so no transaction stays open; an
+        # open auto-begun transaction here makes Alembic's begin_transaction a
+        # no-op and the migration would be rolled back on connection close.
         connection.execute(text(f"SET search_path TO {VERSION_TABLE_SCHEMA}, public"))
+        connection.commit()
 
         context.configure(
             connection=connection,
@@ -64,6 +67,7 @@ def run_migrations_online() -> None:
 
         with context.begin_transaction():
             context.run_migrations()
+        connection.commit()
 
 
 if context.is_offline_mode():
