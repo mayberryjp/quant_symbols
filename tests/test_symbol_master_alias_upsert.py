@@ -33,7 +33,7 @@ class FakeAliasConnection:
         params = params or {}
         self._record_and_guard_tables(sql)
 
-        if "select id from symbol_master.symbol_aliases" in sql:
+        if "select id from symbols.symbol_aliases" in sql:
             rows = [
                 row
                 for row in self.aliases
@@ -43,7 +43,7 @@ class FakeAliasConnection:
             ]
             return FakeResult([{"id": row["id"]} for row in rows[:1]])
 
-        if "insert into symbol_master.symbol_aliases" in sql:
+        if "insert into symbols.symbol_aliases" in sql:
             row = {
                 "id": self.next_alias_id,
                 "symbol_id": params["symbol_id"],
@@ -61,17 +61,17 @@ class FakeAliasConnection:
 
     def _record_and_guard_tables(self, sql: str) -> None:
         tables = (
-            "symbol_master.exchanges",
-            "symbol_master.symbols",
-            "symbol_master.symbol_vendor_ids",
-            "symbol_master.symbol_aliases",
-            "symbol_master.raw_vendor_payloads",
-            "symbol_master.vendor_api_runs",
+            "symbols.exchanges",
+            "symbols.symbols",
+            "symbols.symbol_vendor_ids",
+            "symbols.symbol_aliases",
+            "symbols.raw_vendor_payloads",
+            "symbols.vendor_api_runs",
         )
         for table in tables:
             if table in sql:
                 self.touched_tables.append(table)
-        allowed_tables = {"symbol_master.symbol_aliases"}
+        allowed_tables = {"symbols.symbol_aliases"}
         touched_forbidden = set(self.touched_tables) - allowed_tables
         if touched_forbidden:
             raise AssertionError(f"alias upsert touched {sorted(touched_forbidden)}")
@@ -221,4 +221,4 @@ def test_alias_upsert_does_not_touch_symbols_vendor_ids_exchanges_or_raw_tables(
         candidate=candidate,
     )
 
-    assert set(connection.touched_tables) == {"symbol_master.symbol_aliases"}
+    assert set(connection.touched_tables) == {"symbols.symbol_aliases"}

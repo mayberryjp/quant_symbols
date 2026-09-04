@@ -36,12 +36,12 @@ class FakeSymbolConnection:
         params = params or {}
         self._record_and_guard_tables(sql)
 
-        if "select * from symbol_master.symbols where composite_figi = :figi" in sql:
+        if "select * from symbols.symbols where composite_figi = :figi" in sql:
             return FakeResult(
                 [dict(row) for row in self.symbols if row["composite_figi"] == params["figi"]]
             )
 
-        if "from symbol_master.symbol_vendor_ids v join symbol_master.symbols s" in sql:
+        if "from symbols.symbol_vendor_ids v join symbols.symbols s" in sql:
             matching_vendor_ids = [
                 row
                 for row in self.vendor_ids
@@ -55,7 +55,7 @@ class FakeSymbolConnection:
                 rows.append(dict(symbol))
             return FakeResult(rows[:1])
 
-        if "select * from symbol_master.symbols where lower(locale)" in sql:
+        if "select * from symbols.symbols where lower(locale)" in sql:
             rows = [
                 row
                 for row in self.symbols
@@ -66,7 +66,7 @@ class FakeSymbolConnection:
             rows.sort(key=lambda row: (not row["active"], row["id"]))
             return FakeResult([dict(row) for row in rows[:1]])
 
-        if "insert into symbol_master.symbols" in sql:
+        if "insert into symbols.symbols" in sql:
             row = {
                 "id": self.next_symbol_id,
                 "canonical_ticker": params["canonical_ticker"],
@@ -91,7 +91,7 @@ class FakeSymbolConnection:
             self.symbols.append(row)
             return FakeResult([{"id": row["id"]}])
 
-        if "update symbol_master.symbols set canonical_ticker" in sql:
+        if "update symbols.symbols set canonical_ticker" in sql:
             row = next(row for row in self.symbols if row["id"] == params["id"])
             for key in (
                 "canonical_ticker",
@@ -113,7 +113,7 @@ class FakeSymbolConnection:
             row["last_seen_payload_id"] = params["payload_id"]
             return FakeResult([])
 
-        if "from symbol_master.symbol_vendor_ids" in sql and "vendor_asset_id = :vendor_asset_id" in sql:
+        if "from symbols.symbol_vendor_ids" in sql and "vendor_asset_id = :vendor_asset_id" in sql:
             rows = [
                 row
                 for row in self.vendor_ids
@@ -123,7 +123,7 @@ class FakeSymbolConnection:
             rows.sort(key=lambda row: (not row["active"], row["id"]))
             return FakeResult([dict(row) for row in rows[:1]])
 
-        if "from symbol_master.symbol_vendor_ids" in sql and "lower(vendor_symbol)" in sql:
+        if "from symbols.symbol_vendor_ids" in sql and "lower(vendor_symbol)" in sql:
             rows = [
                 row
                 for row in self.vendor_ids
@@ -133,7 +133,7 @@ class FakeSymbolConnection:
             rows.sort(key=lambda row: (not row["active"], row["id"]))
             return FakeResult([dict(row) for row in rows[:1]])
 
-        if "insert into symbol_master.symbol_vendor_ids" in sql:
+        if "insert into symbols.symbol_vendor_ids" in sql:
             row = {
                 "id": self.next_vendor_id,
                 "symbol_id": params["symbol_id"],
@@ -150,7 +150,7 @@ class FakeSymbolConnection:
             self.vendor_ids.append(row)
             return FakeResult([])
 
-        if "update symbol_master.symbol_vendor_ids set symbol_id" in sql:
+        if "update symbols.symbol_vendor_ids set symbol_id" in sql:
             row = next(row for row in self.vendor_ids if row["id"] == params["id"])
             row["symbol_id"] = params["symbol_id"]
             row["vendor_symbol"] = params["vendor_symbol"]
@@ -164,17 +164,17 @@ class FakeSymbolConnection:
 
     def _record_and_guard_tables(self, sql: str) -> None:
         tables = (
-            "symbol_master.exchanges",
-            "symbol_master.symbols",
-            "symbol_master.symbol_vendor_ids",
-            "symbol_master.symbol_aliases",
-            "symbol_master.raw_vendor_payloads",
-            "symbol_master.vendor_api_runs",
+            "symbols.exchanges",
+            "symbols.symbols",
+            "symbols.symbol_vendor_ids",
+            "symbols.symbol_aliases",
+            "symbols.raw_vendor_payloads",
+            "symbols.vendor_api_runs",
         )
         for table in tables:
             if table in sql:
                 self.touched_tables.append(table)
-        allowed_tables = {"symbol_master.symbols", "symbol_master.symbol_vendor_ids"}
+        allowed_tables = {"symbols.symbols", "symbols.symbol_vendor_ids"}
         touched_forbidden = set(self.touched_tables) - allowed_tables
         if touched_forbidden:
             raise AssertionError(f"symbol/vendor upsert touched {sorted(touched_forbidden)}")
@@ -318,6 +318,6 @@ def test_symbol_vendor_upsert_does_not_touch_exchanges_aliases_or_raw_tables(mon
     )
 
     assert set(connection.touched_tables) == {
-        "symbol_master.symbols",
-        "symbol_master.symbol_vendor_ids",
+        "symbols.symbols",
+        "symbols.symbol_vendor_ids",
     }

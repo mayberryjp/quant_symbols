@@ -68,7 +68,7 @@ def check_database_readiness(database_url: str | None = None) -> ReadinessStatus
         with engine.connect() as connection:
             connection.execute(text("SELECT 1")).scalar_one()
             schema_version = connection.execute(
-                text("SELECT version_num FROM alembic_version")
+                text("SELECT version_num FROM symbols.alembic_version")
             ).scalar_one()
             tables = tuple(
                 connection.execute(
@@ -76,8 +76,9 @@ def check_database_readiness(database_url: str | None = None) -> ReadinessStatus
                         """
                         SELECT table_name
                         FROM information_schema.tables
-                        WHERE table_schema = 'symbol_master'
+                        WHERE table_schema = 'symbols'
                           AND table_type = 'BASE TABLE'
+                          AND table_name <> 'alembic_version'
                         ORDER BY table_name
                         """
                     )

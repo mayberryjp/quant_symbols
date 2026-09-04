@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 
-EXPECTED_SCHEMA_VERSION = "0002_vendor_run_symbol_counts"
+EXPECTED_SCHEMA_VERSION = "0003_consolidate_symbols_schema"
 EXPECTED_TABLES = (
     "vendor_sources",
     "vendor_api_runs",
@@ -59,24 +59,25 @@ def db_verify(_args: argparse.Namespace) -> None:
     with engine.connect() as connection:
         connection.execute(text("SELECT 1")).scalar_one()
         schema_version = connection.execute(
-            text("SELECT version_num FROM alembic_version")
+            text("SELECT version_num FROM symbols.alembic_version")
         ).scalar_one()
         tables = connection.execute(
             text(
                 """
                 SELECT table_name
                 FROM information_schema.tables
-                WHERE table_schema = 'symbol_master'
+                WHERE table_schema = 'symbols'
                   AND table_type = 'BASE TABLE'
+                  AND table_name <> 'alembic_version'
                 ORDER BY table_name
                 """
             )
         ).scalars().all()
         vendor_sources = connection.execute(
-            text("SELECT count(*) FROM symbol_master.vendor_sources")
+            text("SELECT count(*) FROM symbols.vendor_sources")
         ).scalar_one()
         exchanges = connection.execute(
-            text("SELECT count(*) FROM symbol_master.exchanges")
+            text("SELECT count(*) FROM symbols.exchanges")
         ).scalar_one()
 
     if schema_version != EXPECTED_SCHEMA_VERSION:

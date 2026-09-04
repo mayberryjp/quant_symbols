@@ -46,12 +46,12 @@ class ConstraintEnforcingConnection:
         sql = " ".join(str(statement).lower().split())
         params = params or {}
 
-        if "select * from symbol_master.symbols where composite_figi = :figi" in sql:
+        if "select * from symbols.symbols where composite_figi = :figi" in sql:
             return FakeResult(
                 [dict(row) for row in self.symbols if row["composite_figi"] == params["figi"]]
             )
 
-        if "select * from symbol_master.symbols where lower(locale)" in sql:
+        if "select * from symbols.symbols where lower(locale)" in sql:
             rows = [
                 row
                 for row in self.symbols
@@ -62,7 +62,7 @@ class ConstraintEnforcingConnection:
             rows.sort(key=lambda row: (not row["active"], row["id"]))
             return FakeResult([dict(row) for row in rows[:1]])
 
-        if "insert into symbol_master.symbols" in sql:
+        if "insert into symbols.symbols" in sql:
             row = {
                 "id": self.next_symbol_id,
                 "canonical_ticker": params["canonical_ticker"],
@@ -83,7 +83,7 @@ class ConstraintEnforcingConnection:
             self.symbols.append(row)
             return FakeResult([{"id": row["id"]}])
 
-        if "update symbol_master.symbols set name" in sql:
+        if "update symbols.symbols set name" in sql:
             row = next(row for row in self.symbols if row["id"] == params["id"])
             for key in (
                 "name",
@@ -100,7 +100,7 @@ class ConstraintEnforcingConnection:
                 row[key] = params[key]
             return FakeResult([])
 
-        if "from symbol_master.symbol_vendor_ids" in sql and "vendor_asset_id = :vendor_asset_id" in sql:
+        if "from symbols.symbol_vendor_ids" in sql and "vendor_asset_id = :vendor_asset_id" in sql:
             rows = [
                 row
                 for row in self.vendor_ids
@@ -110,7 +110,7 @@ class ConstraintEnforcingConnection:
             rows.sort(key=lambda row: (not row["active"], row["id"]))
             return FakeResult([dict(row) for row in rows[:1]])
 
-        if "from symbol_master.symbol_vendor_ids" in sql and "lower(vendor_symbol)" in sql:
+        if "from symbols.symbol_vendor_ids" in sql and "lower(vendor_symbol)" in sql:
             rows = [
                 row
                 for row in self.vendor_ids
@@ -120,7 +120,7 @@ class ConstraintEnforcingConnection:
             rows.sort(key=lambda row: (not row["active"], row["id"]))
             return FakeResult([dict(row) for row in rows[:1]])
 
-        if "insert into symbol_master.symbol_vendor_ids" in sql:
+        if "insert into symbols.symbol_vendor_ids" in sql:
             self._enforce_vendor_asset_unique(params)
             row = {
                 "id": self.next_vendor_id,
@@ -134,7 +134,7 @@ class ConstraintEnforcingConnection:
             self.vendor_ids.append(row)
             return FakeResult([])
 
-        if "update symbol_master.symbol_vendor_ids set symbol_id" in sql:
+        if "update symbols.symbol_vendor_ids set symbol_id" in sql:
             row = next(row for row in self.vendor_ids if row["id"] == params["id"])
             row["symbol_id"] = params["symbol_id"]
             row["vendor_symbol"] = params["vendor_symbol"]

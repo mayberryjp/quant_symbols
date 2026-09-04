@@ -47,8 +47,8 @@ def list_symbol_aliases(symbol_id: int) -> dict[str, Any] | None:
                         v.id AS vendor_id,
                         v.code AS vendor_code,
                         v.name AS vendor_name
-                    FROM symbol_master.symbol_aliases a
-                    LEFT JOIN symbol_master.vendor_sources v
+                    FROM symbols.symbol_aliases a
+                    LEFT JOIN symbols.vendor_sources v
                         ON v.id = a.source_vendor_id
                     WHERE a.symbol_id = :symbol_id
                     ORDER BY a.alias_type ASC, a.alias_value ASC, a.id ASC
@@ -87,8 +87,8 @@ def list_symbol_vendor_ids(symbol_id: int) -> dict[str, Any] | None:
                         v.id AS vendor_id,
                         v.code AS vendor_code,
                         v.name AS vendor_name
-                    FROM symbol_master.symbol_vendor_ids svi
-                    JOIN symbol_master.vendor_sources v
+                    FROM symbols.symbol_vendor_ids svi
+                    JOIN symbols.vendor_sources v
                         ON v.id = svi.vendor_source_id
                     WHERE svi.symbol_id = :symbol_id
                     ORDER BY v.code ASC, lower(svi.vendor_symbol) ASC, svi.id ASC
@@ -117,23 +117,23 @@ def list_symbol_raw_payloads(params: RawPayloadListParams) -> dict[str, Any] | N
                     """
                     WITH linked_payloads AS (
                         SELECT first_seen_payload_id AS id
-                        FROM symbol_master.symbols
+                        FROM symbols.symbols
                         WHERE id = :symbol_id AND first_seen_payload_id IS NOT NULL
                         UNION
                         SELECT last_seen_payload_id AS id
-                        FROM symbol_master.symbols
+                        FROM symbols.symbols
                         WHERE id = :symbol_id AND last_seen_payload_id IS NOT NULL
                         UNION
                         SELECT first_seen_payload_id AS id
-                        FROM symbol_master.symbol_vendor_ids
+                        FROM symbols.symbol_vendor_ids
                         WHERE symbol_id = :symbol_id AND first_seen_payload_id IS NOT NULL
                         UNION
                         SELECT last_seen_payload_id AS id
-                        FROM symbol_master.symbol_vendor_ids
+                        FROM symbols.symbol_vendor_ids
                         WHERE symbol_id = :symbol_id AND last_seen_payload_id IS NOT NULL
                         UNION
                         SELECT source_payload_id AS id
-                        FROM symbol_master.symbol_aliases
+                        FROM symbols.symbol_aliases
                         WHERE symbol_id = :symbol_id AND source_payload_id IS NOT NULL
                     )
                     SELECT
@@ -146,8 +146,8 @@ def list_symbol_raw_payloads(params: RawPayloadListParams) -> dict[str, Any] | N
                         v.id AS vendor_id,
                         v.code AS vendor_code,
                         v.name AS vendor_name
-                    FROM symbol_master.raw_vendor_payloads p
-                    JOIN symbol_master.vendor_sources v
+                    FROM symbols.raw_vendor_payloads p
+                    JOIN symbols.vendor_sources v
                         ON v.id = p.vendor_source_id
                     WHERE p.id IN (SELECT id FROM linked_payloads)
                     ORDER BY p.received_at DESC, p.id DESC
@@ -196,8 +196,8 @@ def list_vendor_runs(params: VendorRunListParams) -> dict[str, Any]:
                         v.id AS vendor_id,
                         v.code AS vendor_code,
                         v.name AS vendor_name
-                    FROM symbol_master.vendor_api_runs r
-                    JOIN symbol_master.vendor_sources v
+                    FROM symbols.vendor_api_runs r
+                    JOIN symbols.vendor_sources v
                         ON v.id = r.vendor_source_id
                     {_vendor_run_where_clause(params)}
                     ORDER BY r.started_at DESC, r.id DESC
@@ -244,10 +244,10 @@ def get_vendor_run(run_id: int) -> dict[str, Any] | None:
                             v.code AS vendor_code,
                             v.name AS vendor_name,
                             count(p.id) AS raw_payload_count
-                        FROM symbol_master.vendor_api_runs r
-                        JOIN symbol_master.vendor_sources v
+                        FROM symbols.vendor_api_runs r
+                        JOIN symbols.vendor_sources v
                             ON v.id = r.vendor_source_id
-                        LEFT JOIN symbol_master.raw_vendor_payloads p
+                        LEFT JOIN symbols.raw_vendor_payloads p
                             ON p.vendor_api_run_id = r.id
                         WHERE r.id = :run_id
                         GROUP BY
@@ -295,7 +295,7 @@ def _symbol_exists(connection: Any, symbol_id: int) -> bool:
 
     return bool(
         connection.execute(
-            text("SELECT EXISTS (SELECT 1 FROM symbol_master.symbols WHERE id = :symbol_id)"),
+            text("SELECT EXISTS (SELECT 1 FROM symbols.symbols WHERE id = :symbol_id)"),
             {"symbol_id": symbol_id},
         ).scalar_one()
     )

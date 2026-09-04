@@ -5,7 +5,8 @@ from quant_symbols.cli import EXPECTED_SCHEMA_VERSION, EXPECTED_TABLES, build_pa
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_MIGRATION = REPO_ROOT / "alembic" / "versions" / "0001_symbol_master_vendor_traceability.py"
-HEAD_MIGRATION = REPO_ROOT / "alembic" / "versions" / "0002_vendor_run_symbol_counts.py"
+COUNTERS_MIGRATION = REPO_ROOT / "alembic" / "versions" / "0002_vendor_run_symbol_counts.py"
+HEAD_MIGRATION = REPO_ROOT / "alembic" / "versions" / "0003_consolidate_symbols_schema.py"
 
 
 def test_cli_exposes_required_db_commands():
@@ -28,12 +29,21 @@ def test_migration_declares_expected_revision_and_tables():
         assert f"CREATE TABLE symbol_master.{table}" in baseline_text
 
 
-def test_head_migration_adds_run_symbol_counters():
+def test_head_migration_consolidates_into_symbols_schema():
     head_text = HEAD_MIGRATION.read_text()
 
-    assert 'down_revision = "0001_symbol_master_vendor_traceability"' in head_text
-    assert "ADD COLUMN symbols_new integer NOT NULL DEFAULT 0" in head_text
-    assert "ADD COLUMN symbols_delisted integer NOT NULL DEFAULT 0" in head_text
+    assert 'down_revision = "0002_vendor_run_symbol_counts"' in head_text
+    assert "CREATE SCHEMA IF NOT EXISTS symbols" in head_text
+    assert "symbol_master.{table} SET SCHEMA symbols" in head_text
+    assert "DROP SCHEMA IF EXISTS symbol_master" in head_text
+
+
+def test_counters_migration_adds_run_symbol_counters():
+    counters_text = COUNTERS_MIGRATION.read_text()
+
+    assert 'down_revision = "0001_symbol_master_vendor_traceability"' in counters_text
+    assert "ADD COLUMN symbols_new integer NOT NULL DEFAULT 0" in counters_text
+    assert "ADD COLUMN symbols_delisted integer NOT NULL DEFAULT 0" in counters_text
 
 
 def test_migration_keeps_vendor_payloads_jsonb_and_trace_links():

@@ -82,8 +82,8 @@ def list_symbols(params: SymbolListParams) -> dict[str, Any]:
                         e.id AS exchange_id,
                         e.mic AS exchange_mic,
                         e.name AS exchange_name
-                    FROM symbol_master.symbols s
-                    LEFT JOIN symbol_master.exchanges e
+                    FROM symbols.symbols s
+                    LEFT JOIN symbols.exchanges e
                         ON e.id = s.primary_exchange_id
                     {_where_clause(params)}
                     ORDER BY s.canonical_ticker ASC, s.id ASC
@@ -118,7 +118,7 @@ def count_symbols(params: SymbolCountParams) -> dict[str, Any]:
                 text(
                     f"""
                     SELECT count(*) AS total
-                    FROM symbol_master.symbols s
+                    FROM symbols.symbols s
                     {_where_clause(params)}
                     """
                 ),
@@ -167,7 +167,7 @@ def get_symbol_count_history(params: SymbolHistoryParams) -> dict[str, Any]:
                     f"""
                     WITH filtered AS (
                         SELECT s.created_at, s.delisted_at
-                        FROM symbol_master.symbols s
+                        FROM symbols.symbols s
                         {where}
                     ),
                     bounds AS (
@@ -268,8 +268,8 @@ def list_recent_symbols(params: SymbolRecentParams) -> dict[str, Any]:
                         e.id AS exchange_id,
                         e.mic AS exchange_mic,
                         e.name AS exchange_name
-                    FROM symbol_master.symbols s
-                    LEFT JOIN symbol_master.exchanges e
+                    FROM symbols.symbols s
+                    LEFT JOIN symbols.exchanges e
                         ON e.id = s.primary_exchange_id
                     WHERE s.created_at >= now() - (CAST(:days AS int) * interval '1 day')
                     {where}
@@ -325,8 +325,8 @@ def list_delisted_symbols(params: SymbolDelistedParams) -> dict[str, Any]:
                         e.id AS exchange_id,
                         e.mic AS exchange_mic,
                         e.name AS exchange_name
-                    FROM symbol_master.symbols s
-                    LEFT JOIN symbol_master.exchanges e
+                    FROM symbols.symbols s
+                    LEFT JOIN symbols.exchanges e
                         ON e.id = s.primary_exchange_id
                     WHERE s.delisted_at IS NOT NULL
                       AND s.delisted_at >= now() - (CAST(:days AS int) * interval '1 day')
@@ -385,8 +385,8 @@ def get_symbol_by_id(symbol_id: int) -> dict[str, Any] | None:
                             e.id AS exchange_id,
                             e.mic AS exchange_mic,
                             e.name AS exchange_name
-                        FROM symbol_master.symbols s
-                        LEFT JOIN symbol_master.exchanges e
+                        FROM symbols.symbols s
+                        LEFT JOIN symbols.exchanges e
                             ON e.id = s.primary_exchange_id
                         WHERE s.id = :symbol_id
                         LIMIT 1
@@ -436,8 +436,8 @@ def get_symbol_by_ticker(params: SymbolTickerLookupParams) -> dict[str, Any] | N
                             e.id AS exchange_id,
                             e.mic AS exchange_mic,
                             e.name AS exchange_name
-                        FROM symbol_master.symbols s
-                        LEFT JOIN symbol_master.exchanges e
+                        FROM symbols.symbols s
+                        LEFT JOIN symbols.exchanges e
                             ON e.id = s.primary_exchange_id
                         WHERE lower(s.canonical_ticker) = :ticker
                             AND s.market = :market

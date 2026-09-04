@@ -53,10 +53,10 @@ def get_latest_sync_run(params: SyncLatestParams) -> dict[str, Any] | None:
                             v.code AS vendor_code,
                             v.name AS vendor_name,
                             count(p.id) AS raw_payload_count
-                        FROM symbol_master.vendor_api_runs r
-                        JOIN symbol_master.vendor_sources v
+                        FROM symbols.vendor_api_runs r
+                        JOIN symbols.vendor_sources v
                             ON v.id = r.vendor_source_id
-                        LEFT JOIN symbol_master.raw_vendor_payloads p
+                        LEFT JOIN symbols.raw_vendor_payloads p
                             ON p.vendor_api_run_id = r.id
                         WHERE v.code = :vendor
                             AND r.endpoint = :endpoint
@@ -118,10 +118,10 @@ def list_sync_runs(params: SyncRunListParams) -> dict[str, Any]:
                         v.code AS vendor_code,
                         v.name AS vendor_name,
                         count(p.id) AS raw_payload_count
-                    FROM symbol_master.vendor_api_runs r
-                    JOIN symbol_master.vendor_sources v
+                    FROM symbols.vendor_api_runs r
+                    JOIN symbols.vendor_sources v
                         ON v.id = r.vendor_source_id
-                    LEFT JOIN symbol_master.raw_vendor_payloads p
+                    LEFT JOIN symbols.raw_vendor_payloads p
                         ON p.vendor_api_run_id = r.id
                     {_sync_run_where_clause(params)}
                     GROUP BY
@@ -185,10 +185,10 @@ def get_sync_run(run_id: int) -> dict[str, Any] | None:
                             v.code AS vendor_code,
                             v.name AS vendor_name,
                             count(p.id) AS raw_payload_count
-                        FROM symbol_master.vendor_api_runs r
-                        JOIN symbol_master.vendor_sources v
+                        FROM symbols.vendor_api_runs r
+                        JOIN symbols.vendor_sources v
                             ON v.id = r.vendor_source_id
-                        LEFT JOIN symbol_master.raw_vendor_payloads p
+                        LEFT JOIN symbols.raw_vendor_payloads p
                             ON p.vendor_api_run_id = r.id
                         WHERE r.id = :run_id
                         GROUP BY

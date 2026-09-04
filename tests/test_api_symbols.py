@@ -802,7 +802,7 @@ def test_count_symbols_uses_shared_filters_for_text_query(monkeypatch):
         },
     }
     assert "SELECT count(*) AS total" in calls[0]["statement"]
-    assert "FROM symbol_master.symbols s" in calls[0]["statement"]
+    assert "FROM symbols.symbols s" in calls[0]["statement"]
     assert "s.active = :active" in calls[0]["statement"]
     assert "s.market = :market" in calls[0]["statement"]
     assert "s.locale = :locale" in calls[0]["statement"]

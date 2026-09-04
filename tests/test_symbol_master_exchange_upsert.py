@@ -37,17 +37,17 @@ class FakeExchangeConnection:
         params = params or {}
         self._record_and_guard_tables(sql)
 
-        if "select id, name from symbol_master.exchanges where mic" in sql:
+        if "select id, name from symbols.exchanges where mic" in sql:
             rows = [row for row in self.exchanges if row["mic"] == params["mic"]]
             return FakeResult([dict(row) for row in rows])
 
-        if "insert into symbol_master.exchanges" in sql:
+        if "insert into symbols.exchanges" in sql:
             row = {"id": self.next_exchange_id, "mic": params["mic"], "name": params["name"]}
             self.next_exchange_id += 1
             self.exchanges.append(row)
             return FakeResult([{"id": row["id"]}])
 
-        if "update symbol_master.exchanges set name" in sql:
+        if "update symbols.exchanges set name" in sql:
             row = next(row for row in self.exchanges if row["id"] == params["id"])
             row["name"] = params["name"]
             return FakeResult([])
@@ -56,17 +56,17 @@ class FakeExchangeConnection:
 
     def _record_and_guard_tables(self, sql: str) -> None:
         tables = (
-            "symbol_master.exchanges",
-            "symbol_master.symbols",
-            "symbol_master.symbol_vendor_ids",
-            "symbol_master.symbol_aliases",
-            "symbol_master.raw_vendor_payloads",
-            "symbol_master.vendor_api_runs",
+            "symbols.exchanges",
+            "symbols.symbols",
+            "symbols.symbol_vendor_ids",
+            "symbols.symbol_aliases",
+            "symbols.raw_vendor_payloads",
+            "symbols.vendor_api_runs",
         )
         for table in tables:
             if table in sql:
                 self.touched_tables.append(table)
-        forbidden_tables = set(tables) - {"symbol_master.exchanges"}
+        forbidden_tables = set(tables) - {"symbols.exchanges"}
         touched_forbidden = forbidden_tables.intersection(self.touched_tables)
         if touched_forbidden:
             raise AssertionError(f"exchange-only upsert touched {sorted(touched_forbidden)}")
@@ -173,4 +173,4 @@ def test_exchange_upsert_does_not_touch_symbols_vendor_ids_or_aliases(monkeypatc
 
     repository.upsert_exchange_candidate(exchange)
 
-    assert set(connection.touched_tables) == {"symbol_master.exchanges"}
+    assert set(connection.touched_tables) == {"symbols.exchanges"}

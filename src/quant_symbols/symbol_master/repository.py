@@ -53,7 +53,7 @@ class SymbolMasterRepository:
 
     def vendor_source_id(self, code: str) -> int:
         row = self.connection.execute(
-            _text("SELECT id FROM symbol_master.vendor_sources WHERE code = :code"),
+            _text("SELECT id FROM symbols.vendor_sources WHERE code = :code"),
             {"code": code},
         ).mappings().first()
         if row is None:
@@ -64,7 +64,7 @@ class SymbolMasterRepository:
         row = self.connection.execute(
             _text(
                 """
-                INSERT INTO symbol_master.vendor_sources (code, name, base_url)
+                INSERT INTO symbols.vendor_sources (code, name, base_url)
                 VALUES (:code, :name, :base_url)
                 ON CONFLICT (code) DO UPDATE
                 SET name = EXCLUDED.name,
@@ -81,7 +81,7 @@ class SymbolMasterRepository:
         row = self.connection.execute(
             _text(
                 """
-                INSERT INTO symbol_master.vendor_api_runs
+                INSERT INTO symbols.vendor_api_runs
                     (vendor_source_id, endpoint, request_params, status, started_at)
                 VALUES (:vendor_source_id, :endpoint, CAST(:request_params AS jsonb), 'running', clock_timestamp())
                 RETURNING id
@@ -110,7 +110,7 @@ class SymbolMasterRepository:
         self.connection.execute(
             _text(
                 """
-                UPDATE symbol_master.vendor_api_runs
+                UPDATE symbols.vendor_api_runs
                 SET status = :status,
                     finished_at = clock_timestamp(),
                     records_seen = :records_seen,
@@ -145,7 +145,7 @@ class SymbolMasterRepository:
         row = self.connection.execute(
             _text(
                 """
-                INSERT INTO symbol_master.raw_vendor_payloads
+                INSERT INTO symbols.raw_vendor_payloads
                     (vendor_source_id, vendor_api_run_id, provider_record_id, provider_ticker, payload)
                 VALUES
                     (:vendor_source_id, :run_id, :provider_record_id, :provider_ticker, CAST(:payload AS jsonb))
@@ -186,8 +186,8 @@ class SymbolMasterRepository:
                 """
                 SELECT r.id, v.code AS vendor, r.endpoint, r.status, r.started_at, r.finished_at,
                        r.records_seen, r.records_inserted, r.records_failed, r.error_message
-                FROM symbol_master.vendor_api_runs r
-                JOIN symbol_master.vendor_sources v ON v.id = r.vendor_source_id
+                FROM symbols.vendor_api_runs r
+                JOIN symbols.vendor_sources v ON v.id = r.vendor_source_id
                 ORDER BY r.started_at DESC, r.id DESC
                 LIMIT 1
                 """
@@ -201,14 +201,14 @@ class SymbolMasterRepository:
                 """
                 SELECT r.id, v.code AS vendor, r.endpoint, r.status, r.started_at, r.finished_at,
                        r.records_seen, r.records_inserted, r.records_failed
-                FROM symbol_master.vendor_api_runs r
-                JOIN symbol_master.vendor_sources v ON v.id = r.vendor_source_id
+                FROM symbols.vendor_api_runs r
+                JOIN symbols.vendor_sources v ON v.id = r.vendor_source_id
                 WHERE v.code = 'massive'
                   AND r.endpoint = '/v3/reference/tickers'
                   AND r.status = 'succeeded'
                   AND EXISTS (
                       SELECT 1
-                      FROM symbol_master.raw_vendor_payloads p
+                      FROM symbols.raw_vendor_payloads p
                       WHERE p.vendor_api_run_id = r.id
                         AND p.vendor_source_id = r.vendor_source_id
                   )
@@ -229,7 +229,7 @@ class SymbolMasterRepository:
             _text(
                 """
                 SELECT id, provider_ticker, payload
-                FROM symbol_master.raw_vendor_payloads
+                FROM symbols.raw_vendor_payloads
                 WHERE vendor_source_id = :vendor_source_id
                   AND vendor_api_run_id = :run_id
                 ORDER BY id
@@ -305,14 +305,14 @@ class SymbolMasterRepository:
 
     def _upsert_exchange(self, exchange: ExchangeCandidate | MassiveExchangeCandidate, counts: dict[str, int]) -> int:
         row = self.connection.execute(
-            _text("SELECT id, name FROM symbol_master.exchanges WHERE mic = :mic"),
+            _text("SELECT id, name FROM symbols.exchanges WHERE mic = :mic"),
             {"mic": exchange.mic},
         ).mappings().first()
         if row is None:
             inserted = self.connection.execute(
                 _text(
                     """
-                    INSERT INTO symbol_master.exchanges (mic, name)
+                    INSERT INTO symbols.exchanges (mic, name)
                     VALUES (:mic, :name)
                     RETURNING id
                     """
@@ -323,7 +323,7 @@ class SymbolMasterRepository:
             return int(inserted["id"])
         if row["name"] != exchange.name and exchange.provisional is False:
             self.connection.execute(
-                _text("UPDATE symbol_master.exchanges SET name = :name, updated_at = now() WHERE id = :id"),
+                _text("UPDATE symbols.exchanges SET name = :name, updated_at = now() WHERE id = :id"),
                 {"id": row["id"], "name": exchange.name},
             )
             _increment(counts, "exchanges_updated")
@@ -361,7 +361,7 @@ class SymbolMasterRepository:
             inserted = self.connection.execute(
                 _text(
                     """
-                    INSERT INTO symbol_master.symbols
+                    INSERT INTO symbols.symbols
                         (canonical_ticker, name, market, locale, currency, primary_exchange_id,
                          asset_class, security_type, active, cik, composite_figi, share_class_figi,
                          first_seen_run_id, first_seen_payload_id, last_seen_run_id, last_seen_payload_id,
@@ -386,7 +386,7 @@ class SymbolMasterRepository:
         self.connection.execute(
             _text(
                 """
-                UPDATE symbol_master.symbols
+                UPDATE symbols.symbols
                 SET name = :name,
                     currency = :currency,
                     primary_exchange_id = :primary_exchange_id,
@@ -411,7 +411,7 @@ class SymbolMasterRepository:
     def _find_symbol(self, candidate: SymbolCandidate) -> dict[str, Any] | None:
         if candidate.composite_figi:
             row = self.connection.execute(
-                _text("SELECT * FROM symbol_master.symbols WHERE composite_figi = :figi"),
+                _text("SELECT * FROM symbols.symbols WHERE composite_figi = :figi"),
                 {"figi": candidate.composite_figi},
             ).mappings().first()
             if row is not None:
@@ -419,7 +419,7 @@ class SymbolMasterRepository:
         row = self.connection.execute(
             _text(
                 """
-                SELECT * FROM symbol_master.symbols
+                SELECT * FROM symbols.symbols
                 WHERE lower(locale) = lower(:locale)
                   AND lower(market) = lower(:market)
                   AND lower(canonical_ticker) = lower(:ticker)
@@ -438,7 +438,7 @@ class SymbolMasterRepository:
     def _find_massive_symbol(self, vendor_source_id: int, candidate: MassiveTickerCandidate) -> dict[str, Any] | None:
         if candidate.composite_figi:
             row = self.connection.execute(
-                _text("SELECT * FROM symbol_master.symbols WHERE composite_figi = :figi"),
+                _text("SELECT * FROM symbols.symbols WHERE composite_figi = :figi"),
                 {"figi": candidate.composite_figi},
             ).mappings().first()
             if row is not None:
@@ -448,8 +448,8 @@ class SymbolMasterRepository:
                 _text(
                     """
                     SELECT s.*
-                    FROM symbol_master.symbol_vendor_ids v
-                    JOIN symbol_master.symbols s ON s.id = v.symbol_id
+                    FROM symbols.symbol_vendor_ids v
+                    JOIN symbols.symbols s ON s.id = v.symbol_id
                     WHERE v.vendor_source_id = :vendor_source_id
                       AND lower(v.vendor_symbol) = lower(:vendor_symbol)
                     ORDER BY v.active DESC, s.active DESC, s.id ASC
@@ -463,7 +463,7 @@ class SymbolMasterRepository:
         row = self.connection.execute(
             _text(
                 """
-                SELECT * FROM symbol_master.symbols
+                SELECT * FROM symbols.symbols
                 WHERE lower(locale) = lower(:locale)
                   AND lower(market) = lower(:market)
                   AND lower(canonical_ticker) = lower(:ticker)
@@ -489,7 +489,7 @@ class SymbolMasterRepository:
             inserted = self.connection.execute(
                 _text(
                     """
-                    INSERT INTO symbol_master.symbols
+                    INSERT INTO symbols.symbols
                         (canonical_ticker, name, market, locale, currency, primary_exchange_id,
                          asset_class, security_type, active, cik, composite_figi, share_class_figi,
                          first_seen_run_id, first_seen_payload_id, last_seen_run_id, last_seen_payload_id,
@@ -510,7 +510,7 @@ class SymbolMasterRepository:
         self.connection.execute(
             _text(
                 """
-                UPDATE symbol_master.symbols
+                UPDATE symbols.symbols
                 SET canonical_ticker = :canonical_ticker,
                     name = :name,
                     market = :market,
@@ -551,7 +551,7 @@ class SymbolMasterRepository:
                 _text(
                     """
                     SELECT id, symbol_id, vendor_symbol, vendor_asset_id, active
-                    FROM symbol_master.symbol_vendor_ids
+                    FROM symbols.symbol_vendor_ids
                     WHERE vendor_source_id = :vendor_source_id
                       AND vendor_asset_id = :vendor_asset_id
                     ORDER BY active DESC, id ASC
@@ -565,7 +565,7 @@ class SymbolMasterRepository:
                 _text(
                     """
                     SELECT id, symbol_id, vendor_symbol, vendor_asset_id, active
-                    FROM symbol_master.symbol_vendor_ids
+                    FROM symbols.symbol_vendor_ids
                     WHERE vendor_source_id = :vendor_source_id
                       AND lower(vendor_symbol) = lower(:vendor_symbol)
                     ORDER BY active DESC, id ASC
@@ -591,7 +591,7 @@ class SymbolMasterRepository:
             self.connection.execute(
                 _text(
                     """
-                    INSERT INTO symbol_master.symbol_vendor_ids
+                    INSERT INTO symbols.symbol_vendor_ids
                         (symbol_id, vendor_source_id, vendor_symbol, vendor_asset_id,
                          first_seen_run_id, first_seen_payload_id, last_seen_run_id, last_seen_payload_id, active)
                     VALUES
@@ -613,7 +613,7 @@ class SymbolMasterRepository:
         self.connection.execute(
             _text(
                 """
-                UPDATE symbol_master.symbol_vendor_ids
+                UPDATE symbols.symbol_vendor_ids
                 SET symbol_id = :symbol_id,
                     vendor_symbol = :vendor_symbol,
                     vendor_asset_id = :vendor_asset_id,
@@ -642,7 +642,7 @@ class SymbolMasterRepository:
             row = self.connection.execute(
                 _text(
                     """
-                    SELECT id, symbol_id, vendor_symbol, active FROM symbol_master.symbol_vendor_ids
+                    SELECT id, symbol_id, vendor_symbol, active FROM symbols.symbol_vendor_ids
                     WHERE vendor_source_id = :vendor_source_id
                       AND vendor_asset_id = :vendor_asset_id
                     ORDER BY active DESC, id ASC
@@ -655,7 +655,7 @@ class SymbolMasterRepository:
             row = self.connection.execute(
                 _text(
                     """
-                    SELECT id, symbol_id, vendor_symbol, active FROM symbol_master.symbol_vendor_ids
+                    SELECT id, symbol_id, vendor_symbol, active FROM symbols.symbol_vendor_ids
                     WHERE vendor_source_id = :vendor_source_id
                       AND lower(vendor_symbol) = lower(:vendor_symbol)
                     ORDER BY active DESC, id ASC
@@ -668,7 +668,7 @@ class SymbolMasterRepository:
             self.connection.execute(
                 _text(
                     """
-                    INSERT INTO symbol_master.symbol_vendor_ids
+                    INSERT INTO symbols.symbol_vendor_ids
                         (symbol_id, vendor_source_id, vendor_symbol, vendor_asset_id,
                          first_seen_run_id, first_seen_payload_id, last_seen_run_id, last_seen_payload_id, active)
                     VALUES
@@ -696,7 +696,7 @@ class SymbolMasterRepository:
         self.connection.execute(
             _text(
                 """
-                UPDATE symbol_master.symbol_vendor_ids
+                UPDATE symbols.symbol_vendor_ids
                 SET symbol_id = :symbol_id,
                     vendor_symbol = :vendor_symbol,
                     vendor_asset_id = :vendor_asset_id,
@@ -730,7 +730,7 @@ class SymbolMasterRepository:
         row = self.connection.execute(
             _text(
                 """
-                SELECT id FROM symbol_master.symbol_aliases
+                SELECT id FROM symbols.symbol_aliases
                 WHERE alias_type = :alias_type
                   AND lower(alias_value) = lower(:alias_value)
                   AND active
@@ -744,7 +744,7 @@ class SymbolMasterRepository:
         self.connection.execute(
             _text(
                 """
-                INSERT INTO symbol_master.symbol_aliases
+                INSERT INTO symbols.symbol_aliases
                     (symbol_id, alias_type, alias_value, source_vendor_id, source_payload_id)
                 VALUES
                     (:symbol_id, :alias_type, :alias_value, :source_vendor_id, :source_payload_id)
